@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Testing UI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .request-history {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .response-area {
+            min-height: 200px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        .status-pending { color: #ffc107; }
+        .status-completed { color: #28a745; }
+        .status-failed { color: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>API Testing UI</h1>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Make Request</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="apiForm">
+                            <div class="mb-3">
+                                <label class="form-label">Method</label>
+                                <select class="form-select" name="method" required>
+                                    <option value="GET">GET</option>
+                                    <option value="POST" selected>POST</option>
+                                    <option value="PUT">PUT</option>
+                                    <option value="DELETE">DELETE</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">URL</label>
+                                <div class="input-group">
+                                    <input type="url" class="form-control" name="url" value="https://jsonplaceholder.typicode.com/posts" required>
+                                    <button type="button" class="btn btn-outline-secondary" id="testButton">Test</button>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Headers (JSON)</label>
+                                <textarea class="form-control" name="headers" rows="3">{"Content-Type": "application/json"}</textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Body (JSON)</label>
+                                <textarea class="form-control" name="body" rows="5">{
+    "title": "Test Post",
+    "body": "This is a test post from the API Testing UI",
+    "userId": 1
+}</textarea>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Send Request</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Response</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="response-area" id="responseArea">
+                            <pre id="responseContent">Response will appear here...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5>Request History</h5>
+                        <button id="clearHistoryButton" class="btn btn-danger btn-sm">Clear History</button>
+                    </div>
+                    <div class="card-body request-history">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Method</th>
+                                    <th>URL</th>
+                                    <th>Status</th>
+                                    <th>Time</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% requests.forEach(request => { %>
+                                    <tr>
+                                        <td><%= request.method %></td>
+                                        <td><%= request.url %></td>
+                                        <td>
+                                            <span class="status-<%= request.status %>">
+                                                <%= request.status %>
+                                            </span>
+                                        </td>
+                                        <td><%= new Date(request.timestamp).toLocaleString() %></td>
+                                        <td>
+                                            <button onclick="viewRequestDetails('<%= request._id %>')" class="btn btn-sm btn-info">
+                                                View Details
+                                            </button>
+                                        </td>
+                                    </tr>
+                                <% }); %>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Modal Dialog -->
+    <div class="modal fade" id="requestDetailsModal" tabindex="-1" aria-labelledby="requestDetailsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="requestDetailsModalLabel">Request Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Request</h6>
+                            <pre id="modalRequestDetails" class="bg-light p-3 rounded"></pre>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Response</h6>
+                            <pre id="modalResponseDetails" class="bg-light p-3 rounded"></pre>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const modal = new bootstrap.Modal(document.getElementById('requestDetailsModal'));
+        
+        document.getElementById('testButton').addEventListener('click', () => {
+            const form = document.getElementById('apiForm');
+            form.dispatchEvent(new Event('submit'));
+        });
+
+        // Add clear history functionality
+        document.getElementById('clearHistoryButton').addEventListener('click', async () => {
+            if (confirm('Are you sure you want to clear all request history?')) {
+                try {
+                    const response = await fetch('/api/requests', {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        // Clear the history table
+                        document.querySelector('tbody').innerHTML = '';
+                    } else {
+                        alert('Failed to clear history');
+                    }
+                } catch (error) {
+                    console.error('Error clearing history:', error);
+                    alert('Error clearing history');
+                }
+            }
+        });
+
+        // Function to handle view details click
+        async function viewRequestDetails(requestId) {
+            try {
+                const response = await fetch(`/api/requests/${requestId}`);
+                const data = await response.json();
+                
+                // Format and display request details
+                document.getElementById('modalRequestDetails').textContent = 
+                    JSON.stringify({
+                        method: data.method,
+                        url: data.url,
+                        headers: data.headers,
+                        body: data.body
+                    }, null, 2);
+                
+                // Format and display response details
+                document.getElementById('modalResponseDetails').textContent = 
+                    JSON.stringify({
+                        status: data.status,
+                        statusCode: data.statusCode,
+                        response: data.response
+                    }, null, 2);
+                
+                // Show the modal
+                modal.show();
+            } catch (error) {
+                console.error('Error fetching request details:', error);
+            }
+        }
+
+        document.getElementById('apiForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const request = {
+                method: formData.get('method'),
+                url: formData.get('url'),
+                headers: JSON.parse(formData.get('headers')),
+                body: formData.get('body') ? JSON.parse(formData.get('body')) : null
+            };
+
+            try {
+                const response = await fetch('/api/test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(request)
+                });
+
+                const data = await response.json();
+                document.getElementById('responseContent').textContent = 
+                    JSON.stringify(data, null, 2);
+                
+                // Instead of reloading, fetch and update the history
+                const historyResponse = await fetch('/api/requests');
+                const historyData = await historyResponse.json();
+                
+                // Update the history table
+                const tbody = document.querySelector('tbody');
+                tbody.innerHTML = historyData.map(request => `
+                    <tr>
+                        <td>${request.method}</td>
+                        <td>${request.url}</td>
+                        <td>
+                            <span class="status-${request.status}">
+                                ${request.status}
+                            </span>
+                        </td>
+                        <td>${new Date(request.timestamp).toLocaleString()}</td>
+                        <td>
+                            <button onclick="viewRequestDetails('${request._id}')" class="btn btn-sm btn-info">
+                                View Details
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                document.getElementById('responseContent').textContent = 
+                    `Error: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html> 
