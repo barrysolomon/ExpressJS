@@ -59,6 +59,59 @@ kubectl get service -n nodejs api-testing-ui
 
 The application will be available at the LoadBalancer IP (e.g., `http://198.19.249.2`)
 
+## Lumigo Tracing
+
+```bash
+helm repo add lumigo https://lumigo-io.github.io/lumigo-kubernetes-operator && \
+helm repo update && \
+echo "
+cluster:
+  name: TestCluster
+lumigoToken:
+  value: t_f8f7b905da964eef89261
+monitoredNamespaces:
+  - namespace: nodejs
+    loggingEnabled: true
+    tracingEnabled: true
+  - namespace: python
+    loggingEnabled: true
+    tracingEnabled: true
+" | helm upgrade -i lumigo lumigo/lumigo-operator --namespace lumigo-system --create-namespace --values -
+```
+
+Response should be
+
+```bash
+1. create a secret with a Lumigo token in that namespace:
+
+  $ kubectl create secret generic --namespace <NAMESPACE> lumigo-credentials --from-literal token=<LUMIGO_TOKEN>
+
+  To retrieve your Lumigo token, refer to: https://docs.lumigo.io/docs/lumigo-tokens.
+
+2. create a 'Lumigo' resource in that namespace:
+
+  $ echo '{
+      "apiVersion": "operator.lumigo.io/v1alpha1",
+      "kind": "Lumigo",
+      "metadata": {
+        "name": "lumigo"
+      },
+      "spec": {
+        "lumigoToken": {
+          "secretRef": {
+            "name": "lumigo-credentials",
+            "key": "token"
+          } 
+        }
+      }
+    }' | kubectl apply -f - --namespace <NAMESPACE>
+
+For more information on how to configure the Lumigo operator, refer to: https://github.com/lumigo-io/lumigo-kubernetes-operator
+
+(To turn off ANSI colors in the output, set the 'output.color' value to 'false')
+```
+
+
 ## Debugging
 
 ### Common Issues

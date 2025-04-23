@@ -100,23 +100,23 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <% requests.forEach(request => { %>
+                                {% for request in requests %}
                                     <tr>
-                                        <td><%= request.method %></td>
-                                        <td><%= request.url %></td>
+                                        <td>{{ request.method }}</td>
+                                        <td>{{ request.url }}</td>
                                         <td>
-                                            <span class="status-<%= request.status %>">
-                                                <%= request.status %>
+                                            <span class="status-{{ request.status }}">
+                                                {{ request.status }}
                                             </span>
                                         </td>
-                                        <td><%= new Date(request.timestamp).toLocaleString() %></td>
+                                        <td>{{ request.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                                         <td>
-                                            <button onclick="viewRequestDetails('<%= request._id %>')" class="btn btn-sm btn-info">
+                                            <button onclick="viewRequestDetails('{{ request._id }}')" class="btn btn-sm btn-info">
                                                 View Details
                                             </button>
                                         </td>
                                     </tr>
-                                <% }); %>
+                                {% endfor %}
                             </tbody>
                         </table>
                     </div>
@@ -125,7 +125,7 @@
         </div>
     </div>
 
-    <!-- Add Modal Dialog -->
+    <!-- Modal Dialog -->
     <div class="modal fade" id="requestDetailsModal" tabindex="-1" aria-labelledby="requestDetailsModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
@@ -161,34 +161,11 @@
             form.dispatchEvent(new Event('submit'));
         });
 
-        // Add clear history functionality
-        document.getElementById('clearHistoryButton').addEventListener('click', async () => {
-            if (confirm('Are you sure you want to clear all request history?')) {
-                try {
-                    const response = await fetch('/api/requests', {
-                        method: 'DELETE'
-                    });
-                    
-                    if (response.ok) {
-                        // Clear the history table
-                        document.querySelector('tbody').innerHTML = '';
-                    } else {
-                        alert('Failed to clear history');
-                    }
-                } catch (error) {
-                    console.error('Error clearing history:', error);
-                    alert('Error clearing history');
-                }
-            }
-        });
-
-        // Function to handle view details click
         async function viewRequestDetails(requestId) {
             try {
                 const response = await fetch(`/api/requests/${requestId}`);
                 const data = await response.json();
                 
-                // Format and display request details
                 document.getElementById('modalRequestDetails').textContent = 
                     JSON.stringify({
                         method: data.method,
@@ -197,7 +174,6 @@
                         body: data.body
                     }, null, 2);
                 
-                // Format and display response details
                 document.getElementById('modalResponseDetails').textContent = 
                     JSON.stringify({
                         status: data.status,
@@ -205,7 +181,6 @@
                         response: data.response
                     }, null, 2);
                 
-                // Show the modal
                 modal.show();
             } catch (error) {
                 console.error('Error fetching request details:', error);
@@ -262,6 +237,25 @@
             } catch (error) {
                 document.getElementById('responseContent').textContent = 
                     `Error: ${error.message}`;
+            }
+        });
+
+        document.getElementById('clearHistoryButton').addEventListener('click', async () => {
+            if (confirm('Are you sure you want to clear all request history?')) {
+                try {
+                    const response = await fetch('/api/requests', {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        document.querySelector('tbody').innerHTML = '';
+                    } else {
+                        alert('Failed to clear history');
+                    }
+                } catch (error) {
+                    console.error('Error clearing history:', error);
+                    alert('Error clearing history');
+                }
             }
         });
     </script>
