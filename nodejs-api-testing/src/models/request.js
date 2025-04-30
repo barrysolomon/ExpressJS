@@ -19,13 +19,27 @@ const requestSchema = new mongoose.Schema({
         default: null
     },
     response: {
-        status_code: Number,
-        headers: Object,
-        body: mongoose.Schema.Types.Mixed
+        status_code: {
+            type: Number,
+            default: null
+        },
+        headers: {
+            type: Object,
+            default: {}
+        },
+        body: {
+            type: mongoose.Schema.Types.Mixed,
+            default: null
+        }
     },
     timestamp: {
         type: Date,
         default: Date.now
+    },
+    status: {
+        type: String,
+        enum: ['pending', 'completed', 'failed'],
+        default: 'pending'
     }
 });
 

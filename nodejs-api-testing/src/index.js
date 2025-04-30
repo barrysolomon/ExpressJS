@@ -2,56 +2,35 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
 require('dotenv').config();
-const winston = require('winston');
+const pino = require('pino');
 const fs = require('fs');
 const mongoose = require('mongoose');
+const axios = require('axios');
 
-// Create logger
-const logger = winston.createLogger({
-    level: process.env.LOG_LEVEL || 'info',
-    format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.printf(({ timestamp, level, message, ...meta }) => {
-            return `${timestamp} ${level}: ${message} ${Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ''}`;
-        })
-    ),
-    transports: [
-        new winston.transports.Console(),
-        new winston.transports.File({ 
-            filename: 'logs/error.log', 
-            level: 'error',
-            format: winston.format.combine(
-                winston.format.timestamp(),
-                winston.format.printf(({ timestamp, level, message, ...meta }) => {
-                    return `${timestamp} ${level}: ${message} ${Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ''}`;
-                })
-            )
-        }),
-        new winston.transports.File({ 
-            filename: 'logs/combined.log',
-            format: winston.format.combine(
-                winston.format.timestamp(),
-                winston.format.printf(({ timestamp, level, message, ...meta }) => {
-                    return `${timestamp} ${level}: ${message} ${Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ''}`;
-                })
-            )
-        })
-    ]
-});
+// Create logger with default configuration
+const logger = pino();
+
+// Test logger immediately after creation
+logger.info('Logger initialized');
 
 // Get version information
 const nodeVersion = process.version;
 const expressVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '../node_modules/express/package.json'))).version;
-const appVersion = process.env.VERSION || JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'))).version;
+const packageVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'))).version;
+const appVersion = process.env.VERSION || packageVersion;
+
+// Log version information
+logger.info('Version information', {
+    nodeVersion,
+    expressVersion,
+    packageVersion,
+    appVersion,
+    envVersion: process.env.VERSION
+});
 
 const app = express();
 const port = process.env.PORT || 3000;
 const mongoUri = process.env.MONGODB_URI;
-
-// Ensure logs directory exists
-if (!fs.existsSync('logs')) {
-    fs.mkdirSync('logs');
-}
 
 // Middleware
 app.use(bodyParser.json());
@@ -149,9 +128,8 @@ app.get('/js/app.js', (req, res) => {
             // Fetch history on page load
             async function fetchHistory() {
                 try {
-                    const response = await fetch('/api/history');
-                    const data = await response.json();
-                    requestHistory = data;
+                    const response = await axios.get('/api/history');
+                    requestHistory = response.data;
                     updateHistoryTable();
                 } catch (error) {
                     console.error('Error fetching history:', error);
@@ -207,10 +185,8 @@ app.get('/js/app.js', (req, res) => {
             // Clear history
             document.getElementById('clearHistory').addEventListener('click', async function() {
                 try {
-                    const response = await fetch('/api/history', {
-                        method: 'DELETE'
-                    });
-                    if (response.ok) {
+                    const response = await axios.delete('/api/history');
+                    if (response.status === 200) {
                         requestHistory = [];
                         updateHistoryTable();
                     } else {
@@ -234,10 +210,8 @@ app.get('/js/app.js', (req, res) => {
             window.deleteRequest = async function(index) {
                 const request = requestHistory[index];
                 try {
-                    const response = await fetch(\`/api/requests/\${request._id}\`, {
-                        method: 'DELETE'
-                    });
-                    if (response.ok) {
+                    const response = await axios.delete(\`/api/requests/\${request._id}\`);
+                    if (response.status === 200) {
                         requestHistory.splice(index, 1);
                         updateHistoryTable();
                     } else {
@@ -276,20 +250,14 @@ app.get('/js/app.js', (req, res) => {
                         }
                     }
 
-                    const response = await fetch('/api/test', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            method,
-                            url,
-                            headers: parsedHeaders,
-                            body: parsedBody
-                        })
+                    const response = await axios.post('/api/test', {
+                        method,
+                        url,
+                        headers: parsedHeaders,
+                        body: parsedBody
                     });
 
-                    const data = await response.json();
+                    const data = response.data;
                     
                     // Update response display
                     const statusCode = document.getElementById('statusCode');
@@ -339,7 +307,7 @@ app.get('/js/app.js', (req, res) => {
                     document.getElementById('statusCode').className = 'status-5xx';
                     document.getElementById('responseTime').textContent = '-';
                     document.getElementById('responseHeaders').innerHTML = '';
-                    document.getElementById('responseBody').innerHTML = \`<h6>Error:</h6><pre>\${error.message}</pre>\`;
+                    document.getElementById('responseBody').innerHTML = \`<h6>Error:</h6><pre>\${error.response?.data?.error || error.message}</pre>\`;
                 }
             });
 
@@ -401,8 +369,6 @@ if (mongoUri) {
 
     // Add connection options
     const mongooseOptions = {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
         serverSelectionTimeoutMS: 5000,
         socketTimeoutMS: 45000,
     };
@@ -471,6 +437,31 @@ app.post('/api/test', async (req, res) => {
             timestamp: new Date().toISOString()
         });
 
+        // Save initial request to database if MongoDB is available
+        let dbRequest = null;
+        if (mongoUri) {
+            try {
+                const Request = require('./models/request');
+                dbRequest = new Request({
+                    method,
+                    url,
+                    headers: parsedHeaders,
+                    body: parsedBody,
+                    response: {
+                        status_code: null,
+                        headers: {},
+                        body: null
+                    },
+                    timestamp: new Date(),
+                    status: 'pending'
+                });
+                await dbRequest.save();
+                logger.info('Saved initial request to database', { requestId: dbRequest._id });
+            } catch (err) {
+                logger.error('Failed to save initial request to database', { error: err.message });
+            }
+        }
+
         // For GET requests, don't send a body
         const fetchOptions = {
             method,
@@ -522,26 +513,19 @@ app.post('/api/test', async (req, res) => {
             timestamp: new Date().toISOString()
         });
 
-        // Save request to database if MongoDB is available
-        if (mongoUri) {
+        // Update request in database if MongoDB is available
+        if (mongoUri && dbRequest) {
             try {
-                const Request = require('./models/request');
-                const request = new Request({
-                    method,
-                    url,
-                    headers: parsedHeaders,
-                    body: parsedBody,
-                    response: {
-                        status_code: response.status,
-                        headers: Object.fromEntries(response.headers.entries()),
-                        body: responseData
-                    },
-                    timestamp: new Date()
-                });
-                await request.save();
-                logger.info('Saved request to database', { requestId: request._id });
+                dbRequest.response = {
+                    status_code: response.status,
+                    headers: Object.fromEntries(response.headers.entries()),
+                    body: responseData
+                };
+                dbRequest.status = 'completed';
+                await dbRequest.save();
+                logger.info('Updated request in database', { requestId: dbRequest._id });
             } catch (err) {
-                logger.error('Failed to save request to database', { error: err.message });
+                logger.error('Failed to update request in database', { error: err.message });
             }
         }
         
@@ -568,26 +552,19 @@ app.post('/api/test', async (req, res) => {
             timestamp: new Date().toISOString()
         });
 
-        // Save failed request to database if MongoDB is available
-        if (mongoUri) {
+        // Update failed request in database if MongoDB is available
+        if (mongoUri && dbRequest) {
             try {
-                const Request = require('./models/request');
-                const request = new Request({
-                    method: req.body.method,
-                    url: req.body.url,
-                    headers: req.body.headers,
-                    body: req.body.body,
-                    response: {
-                        status_code: 500,
-                        headers: {},
-                        body: { error: error.message }
-                    },
-                    timestamp: new Date()
-                });
-                await request.save();
-                logger.info('Saved failed request to database', { requestId: request._id });
+                dbRequest.response = {
+                    status_code: 500,
+                    headers: {},
+                    body: { error: error.message }
+                };
+                dbRequest.status = 'failed';
+                await dbRequest.save();
+                logger.info('Updated failed request in database', { requestId: dbRequest._id });
             } catch (err) {
-                logger.error('Failed to save failed request to database', { error: err.message });
+                logger.error('Failed to update failed request in database', { error: err.message });
             }
         }
 

@@ -2,23 +2,13 @@ const express = require('express');
 const router = express.Router();
 const Request = require('../models/request');
 const axios = require('axios');
-const winston = require('winston');
+const pino = require('pino');
 
-// Create logger
-const logger = winston.createLogger({
-    level: process.env.LOG_LEVEL || 'info',
-    format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.printf(({ timestamp, level, message, ...meta }) => {
-            return `${timestamp} ${level}: ${message} ${Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ''}`;
-        })
-    ),
-    transports: [
-        new winston.transports.Console(),
-        new winston.transports.File({ filename: 'error.log', level: 'error' }),
-        new winston.transports.File({ filename: 'combined.log' })
-    ]
-});
+// Create logger with default configuration
+const logger = pino();
+
+// Test logger immediately after creation
+logger.info('Routes logger initialized');
 
 // Home page
 router.get('/', async (req, res) => {
@@ -77,16 +67,38 @@ router.delete('/requests/:id', async (req, res) => {
 
 // Make API request
 router.post('/request', async (req, res) => {
+    const requestStartTime = Date.now();
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     try {
         const { url, method, headers, body } = req.body;
         
         // Validate request
         if (!url || !method) {
-            logger.warn('Invalid request', { url, method });
+            logger.warn('Invalid request parameters', {
+                event: 'api_request_validation_failed',
+                requestId,
+                validation: {
+                    url: !!url,
+                    method: !!method
+                },
+                request: { url, method }
+            });
             return res.status(400).json({ error: 'URL and method are required' });
         }
 
-        logger.info('Making API request', { url, method, headers, body });
+        // Log outgoing request
+        logger.info('Outgoing API request initiated', {
+            event: 'api_request_started',
+            requestId,
+            request: {
+                url,
+                method,
+                headers,
+                bodySize: body ? JSON.stringify(body).length : 0
+            },
+            timestamp: new Date().toISOString()
+        });
 
         // Make the request
         const response = await axios({
@@ -96,12 +108,28 @@ router.post('/request', async (req, res) => {
             data: body || null
         });
 
-        logger.info('API request successful', { 
-            url, 
-            method, 
-            status: response.status,
-            headers: response.headers,
-            body: response.data
+        const requestDuration = Date.now() - requestStartTime;
+
+        // Log successful response
+        logger.info('API request completed successfully', {
+            event: 'api_request_completed',
+            requestId,
+            timing: {
+                duration_ms: requestDuration,
+                started_at: new Date(requestStartTime).toISOString(),
+                completed_at: new Date().toISOString()
+            },
+            request: {
+                url,
+                method,
+                headers,
+                bodySize: body ? JSON.stringify(body).length : 0
+            },
+            response: {
+                status: response.status,
+                size: JSON.stringify(response.data).length,
+                headers: response.headers
+            }
         });
 
         // Save request to database
@@ -120,6 +148,20 @@ router.post('/request', async (req, res) => {
 
         await request.save();
 
+        // Log database operation
+        logger.info('Request saved to database', {
+            event: 'database_operation',
+            operation: 'insert',
+            collection: 'requests',
+            documentId: request._id.toString(),
+            metadata: {
+                requestId,
+                url,
+                method,
+                timestamp: request.timestamp.toISOString()
+            }
+        });
+
         res.json({
             success: true,
             request: {
@@ -135,12 +177,28 @@ router.post('/request', async (req, res) => {
             }
         });
     } catch (err) {
-        logger.error('API request error', { 
-            error: err.message,
-            url: req.body.url,
-            method: req.body.method,
-            headers: req.body.headers,
-            body: req.body.body,
+        const requestDuration = Date.now() - requestStartTime;
+
+        // Log error details
+        logger.error('API request failed', {
+            event: 'api_request_failed',
+            requestId,
+            error: {
+                message: err.message,
+                code: err.code,
+                stack: err.stack
+            },
+            timing: {
+                duration_ms: requestDuration,
+                started_at: new Date(requestStartTime).toISOString(),
+                failed_at: new Date().toISOString()
+            },
+            request: {
+                url: req.body.url,
+                method: req.body.method,
+                headers: req.body.headers,
+                bodySize: req.body.body ? JSON.stringify(req.body.body).length : 0
+            },
             response: err.response ? {
                 status: err.response.status,
                 headers: err.response.headers,
@@ -164,6 +222,22 @@ router.post('/request', async (req, res) => {
 
         await request.save();
 
+        // Log failed request saved to database
+        logger.info('Failed request saved to database', {
+            event: 'database_operation',
+            operation: 'insert',
+            collection: 'requests',
+            documentId: request._id.toString(),
+            metadata: {
+                requestId,
+                status: 'failed',
+                error: err.message,
+                url: req.body.url,
+                method: req.body.method,
+                timestamp: request.timestamp.toISOString()
+            }
+        });
+
         res.status(err.response?.status || 500).json({
             error: err.message,
             request: {
@@ -183,11 +257,27 @@ router.post('/request', async (req, res) => {
 
 // Get request history
 router.get('/history', async (req, res) => {
+    const startTime = Date.now();
+    const operationId = `hist_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     try {
+        logger.info('Fetching request history', {
+            event: 'database_operation_started',
+            operation: 'find',
+            collection: 'requests',
+            operationId,
+            parameters: {
+                sort: { timestamp: -1 },
+                limit: 50
+            }
+        });
+
         const requests = await Request.find()
             .sort({ timestamp: -1 })
             .limit(50)
-            .lean(); // Use lean() for better performance
+            .lean();
+        
+        const duration = Date.now() - startTime;
         
         // Convert MongoDB _id to string for JSON serialization
         const formattedRequests = requests.map(req => ({
@@ -196,10 +286,44 @@ router.get('/history', async (req, res) => {
             timestamp: req.timestamp.toISOString()
         }));
         
-        logger.debug('Fetched request history', { count: formattedRequests.length });
+        logger.info('Request history fetched successfully', {
+            event: 'database_operation_completed',
+            operation: 'find',
+            collection: 'requests',
+            operationId,
+            timing: {
+                duration_ms: duration,
+                started_at: new Date(startTime).toISOString(),
+                completed_at: new Date().toISOString()
+            },
+            metadata: {
+                count: formattedRequests.length,
+                oldest_record: formattedRequests.length ? formattedRequests[formattedRequests.length - 1].timestamp : null,
+                newest_record: formattedRequests.length ? formattedRequests[0].timestamp : null
+            }
+        });
+
         res.json(formattedRequests);
     } catch (err) {
-        logger.error('Error fetching request history', { error: err.message });
+        const duration = Date.now() - startTime;
+
+        logger.error('Failed to fetch request history', {
+            event: 'database_operation_failed',
+            operation: 'find',
+            collection: 'requests',
+            operationId,
+            error: {
+                message: err.message,
+                code: err.code,
+                stack: err.stack
+            },
+            timing: {
+                duration_ms: duration,
+                started_at: new Date(startTime).toISOString(),
+                failed_at: new Date().toISOString()
+            }
+        });
+
         res.status(500).json({ error: 'Failed to fetch request history' });
     }
 });
