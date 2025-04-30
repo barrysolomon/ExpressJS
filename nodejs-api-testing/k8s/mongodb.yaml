@@ -21,6 +21,13 @@ spec:
         env:
         - name: MONGO_INITDB_DATABASE
           value: api-testing
+        volumeMounts:
+        - name: mongodb-data
+          mountPath: /data/db
+      volumes:
+      - name: mongodb-data
+        persistentVolumeClaim:
+          claimName: mongodb-pvc
 ---
 apiVersion: v1
 kind: Service
@@ -33,4 +40,16 @@ spec:
   ports:
   - port: 27017
     targetPort: 27017
-  type: ClusterIP 
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc
+  namespace: nodejs
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi 

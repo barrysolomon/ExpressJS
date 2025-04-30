@@ -1,6 +1,6 @@
 {
   "name": "api-testing-ui",
-  "version": "1.0.0",
+  "version": "v1.0.5",
   "description": "API Testing UI with request history and logging",
   "main": "src/index.js",
   "scripts": {
@@ -14,7 +14,7 @@
     "dotenv": "^16.4.5",
     "ejs": "^3.1.9",
     "express": "^4.18.2",
-    "mongoose": "^8.1.3",
+    "mongoose": "^8.13.2",
     "winston": "^3.11.0"
   },
   "devDependencies": {

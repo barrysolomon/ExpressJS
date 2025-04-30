@@ -9,7 +9,9 @@ const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
     format: winston.format.combine(
         winston.format.timestamp(),
-        winston.format.json()
+        winston.format.printf(({ timestamp, level, message, ...meta }) => {
+            return `${timestamp} ${level}: ${message} ${Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ''}`;
+        })
     ),
     transports: [
         new winston.transports.Console(),
@@ -33,10 +35,10 @@ router.get('/', async (req, res) => {
 router.get('/requests', async (req, res) => {
     try {
         const requests = await Request.find().sort({ timestamp: -1 });
-        logger.debug({ requestCount: requests.length }, 'Fetched all requests');
+        logger.debug('Fetched all requests', { requestCount: requests.length });
         res.json(requests);
     } catch (error) {
-        logger.error({ error }, 'Error fetching all requests');
+        logger.error('Error fetching all requests', { error: error.message });
         res.status(500).json({ error: error.message });
     }
 });
@@ -46,26 +48,45 @@ router.get('/requests/:id', async (req, res) => {
     try {
         const request = await Request.findById(req.params.id);
         if (!request) {
-            logger.warn({ requestId: req.params.id }, 'Request not found');
+            logger.warn('Request not found', { requestId: req.params.id });
             return res.status(404).json({ error: 'Request not found' });
         }
-        logger.debug({ requestId: req.params.id }, 'Fetched request details');
+        logger.debug('Fetched request details', { requestId: req.params.id });
         res.json(request);
     } catch (error) {
-        logger.error({ error, requestId: req.params.id }, 'Error fetching request');
+        logger.error('Error fetching request', { error: error.message, requestId: req.params.id });
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Delete specific request
+router.delete('/requests/:id', async (req, res) => {
+    try {
+        const request = await Request.findByIdAndDelete(req.params.id);
+        if (!request) {
+            logger.warn('Request not found for deletion', { requestId: req.params.id });
+            return res.status(404).json({ error: 'Request not found' });
+        }
+        logger.info('Deleted request', { requestId: req.params.id });
+        res.json({ success: true });
+    } catch (error) {
+        logger.error('Error deleting request', { error: error.message, requestId: req.params.id });
         res.status(500).json({ error: error.message });
     }
 });
 
 // Make API request
-router.post('/api/request', async (req, res) => {
+router.post('/request', async (req, res) => {
     try {
         const { url, method, headers, body } = req.body;
         
         // Validate request
         if (!url || !method) {
+            logger.warn('Invalid request', { url, method });
             return res.status(400).json({ error: 'URL and method are required' });
         }
+
+        logger.info('Making API request', { url, method, headers, body });
 
         // Make the request
         const response = await axios({
@@ -73,6 +94,14 @@ router.post('/api/request', async (req, res) => {
             url,
             headers: headers || {},
             data: body || null
+        });
+
+        logger.info('API request successful', { 
+            url, 
+            method, 
+            status: response.status,
+            headers: response.headers,
+            body: response.data
         });
 
         // Save request to database
@@ -106,7 +135,18 @@ router.post('/api/request', async (req, res) => {
             }
         });
     } catch (err) {
-        logger.error('API request error:', err);
+        logger.error('API request error', { 
+            error: err.message,
+            url: req.body.url,
+            method: req.body.method,
+            headers: req.body.headers,
+            body: req.body.body,
+            response: err.response ? {
+                status: err.response.status,
+                headers: err.response.headers,
+                data: err.response.data
+            } : null
+        });
         
         // Save failed request
         const request = new Request({
@@ -142,29 +182,52 @@ router.post('/api/request', async (req, res) => {
 });
 
 // Get request history
-router.get('/api/requests', async (req, res) => {
+router.get('/history', async (req, res) => {
     try {
         const requests = await Request.find()
             .sort({ timestamp: -1 })
-            .limit(50);
+            .limit(50)
+            .lean(); // Use lean() for better performance
         
-        res.json(requests);
+        // Convert MongoDB _id to string for JSON serialization
+        const formattedRequests = requests.map(req => ({
+            ...req,
+            _id: req._id.toString(),
+            timestamp: req.timestamp.toISOString()
+        }));
+        
+        logger.debug('Fetched request history', { count: formattedRequests.length });
+        res.json(formattedRequests);
     } catch (err) {
-        logger.error('Error fetching request history:', err);
+        logger.error('Error fetching request history', { error: err.message });
         res.status(500).json({ error: 'Failed to fetch request history' });
     }
 });
 
+// Delete request history
+router.delete('/history', async (req, res) => {
+    try {
+        await Request.deleteMany({});
+        logger.info('Cleared request history');
+        res.json({ success: true });
+    } catch (err) {
+        logger.error('Error clearing request history', { error: err.message });
+        res.status(500).json({ error: 'Failed to clear request history' });
+    }
+});
+
 // Get request details
-router.get('/api/request/:id', async (req, res) => {
+router.get('/request/:id', async (req, res) => {
     try {
         const request = await Request.findById(req.params.id);
         if (!request) {
+            logger.warn('Request not found', { requestId: req.params.id });
             return res.status(404).json({ error: 'Request not found' });
         }
+        logger.debug('Fetched request details', { requestId: req.params.id });
         res.json(request);
     } catch (error) {
-        logger.error('Error fetching request details:', error);
+        logger.error('Error fetching request details', { error: error.message, requestId: req.params.id });
         res.status(500).json({ error: error.message });
     }
 });

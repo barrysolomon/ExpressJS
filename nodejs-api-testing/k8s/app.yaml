@@ -20,10 +20,25 @@ spec:
         ports:
         - containerPort: 3000
         env:
-        - name: MONGODB_URI
-          value: "mongodb://mongodb.nodejs.svc.cluster.local:27017/api-testing"
         - name: PORT
           value: "3000"
+        - name: LOG_LEVEL
+          value: DEBUG
+        - name: MONGODB_URI
+          value: mongodb://mongodb:27017/api-testing
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: logs
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -36,4 +51,4 @@ spec:
   ports:
   - port: 80
     targetPort: 3000
-  type: LoadBalancer 
+  type: ClusterIP 

@@ -49,6 +49,7 @@ The application will be available at `http://localhost:3000`
 ```bash
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/mongodb.yaml
+kubectl delete -f k8s/app.yaml
 kubectl apply -f k8s/app.yaml
 ```
 

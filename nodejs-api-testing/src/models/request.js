@@ -1,36 +1,27 @@
 const mongoose = require('mongoose');
 
 const requestSchema = new mongoose.Schema({
+    method: {
+        type: String,
+        required: true,
+        enum: ['GET', 'POST', 'PUT', 'DELETE']
+    },
     url: {
         type: String,
         required: true
     },
-    method: {
-        type: String,
-        required: true,
-        enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
-    },
     headers: {
-        type: Map,
-        of: String,
+        type: Object,
         default: {}
     },
     body: {
-        type: mongoose.Schema.Types.Mixed
+        type: mongoose.Schema.Types.Mixed,
+        default: null
     },
     response: {
-        status_code: {
-            type: Number,
-            required: true
-        },
-        headers: {
-            type: Map,
-            of: String,
-            default: {}
-        },
-        body: {
-            type: mongoose.Schema.Types.Mixed
-        }
+        status_code: Number,
+        headers: Object,
+        body: mongoose.Schema.Types.Mixed
     },
     timestamp: {
         type: Date,
