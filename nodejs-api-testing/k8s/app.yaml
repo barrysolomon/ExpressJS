@@ -26,11 +26,14 @@ spec:
           value: DEBUG
         - name: MONGODB_URI
           value: mongodb://mongodb:27017/api-testing
+        # HTTP Logging Configuration
+        - name: HTTP_LOGGING_ENABLED
+          value: "true"
         # OpenTelemetry Configuration
         - name: OTEL_ENABLED
           value: "true"
         - name: OTEL_SAMPLING_RATE
-          value: "1.0"
+          value: "0.2"
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           # value: "https://ga-otlp.lumigo-tracer-edge.golumigo.com"
           value: "http://lumigo-lumigo-operator-telemetry-proxy-service.lumigo-system.svc.cluster.local/v1/traces"
@@ -50,6 +53,15 @@ spec:
           value: "b3"
         - name: OTEL_LOG_LEVEL
           value: "info"
+        # OpenTelemetry Instrumentation Control
+        - name: OTEL_INSTRUMENT_HTTP
+          value: "true"
+        - name: OTEL_INSTRUMENT_EXPRESS
+          value: "true"
+        - name: OTEL_INSTRUMENT_MONGODB
+          value: "true"
+        - name: OTEL_INSTRUMENT_AXIOS
+          value: "true"
         volumeMounts:
         - name: logs
           mountPath: /app/logs

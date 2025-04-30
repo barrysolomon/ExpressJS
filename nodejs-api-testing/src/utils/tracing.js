@@ -1,125 +1,121 @@
-const opentelemetry = require('@opentelemetry/api');
-const { NodeSDK } = require('@opentelemetry/sdk-node');
+const opentelemetry = require('@opentelemetry/sdk-node');
 const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
 const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
 const { Resource } = require('@opentelemetry/resources');
 const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
-const { SimpleSpanProcessor, BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base');
-const { ParentBasedSampler, TraceIdRatioBasedSampler } = require('@opentelemetry/sdk-trace-base');
+const { SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
+const { ParentBasedSampler, TraceIdRatioBased } = require('@opentelemetry/sdk-trace-base');
+const logger = require('./logger');
 
-// Check if OpenTelemetry is enabled
-const isOtelEnabled = process.env.OTEL_ENABLED === 'true';
+function initTracing() {
+  if (process.env.OTEL_ENABLED !== 'true') {
+    logger.info('OpenTelemetry is disabled. Skipping initialization.');
+    return;
+  }
 
-if (!isOtelEnabled) {
-  console.log('OpenTelemetry instrumentation is disabled');
-  module.exports = {
-    start: () => console.log('OpenTelemetry is disabled, no-op start'),
-    shutdown: () => Promise.resolve()
-  };
-  return;
-}
+  logger.info('Starting OpenTelemetry initialization...');
+  logger.info('OpenTelemetry Configuration:', {
+    samplingRate: process.env.OTEL_SAMPLING_RATE,
+    endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    serviceName: process.env.OTEL_SERVICE_NAME,
+    serviceVersion: process.env.OTEL_SERVICE_VERSION,
+    propagators: process.env.OTEL_PROPAGATORS,
+    logLevel: process.env.OTEL_LOG_LEVEL,
+    instrumentations: {
+      http: process.env.OTEL_INSTRUMENT_HTTP === 'true',
+      express: process.env.OTEL_INSTRUMENT_EXPRESS === 'true',
+      mongodb: process.env.OTEL_INSTRUMENT_MONGODB === 'true',
+      axios: process.env.OTEL_INSTRUMENT_AXIOS === 'true'
+    }
+  });
 
-// Get sampling rate from environment variable, default to 1.0 (100%)
-const samplingRate = parseFloat(process.env.OTEL_SAMPLING_RATE || '1.0');
-
-// Create a sampler based on the sampling rate
-const sampler = new ParentBasedSampler({
-  root: new TraceIdRatioBasedSampler(samplingRate),
-});
-
-// Parse headers from environment variable
-const parseHeaders = (headersStr) => {
-  if (!headersStr) return {};
-  return headersStr.split(',').reduce((acc, header) => {
-    const [key, value] = header.split('=');
-    acc[key] = value;
-    return acc;
-  }, {});
-};
-
-// Debug log the configuration
-const config = {
-  enabled: isOtelEnabled,
-  endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-  headers: process.env.OTEL_EXPORTER_OTLP_HEADERS,
-  samplingRate
-};
-console.log('OpenTelemetry Configuration:', config);
-
-// Create the OTLP exporter with debug logging
-class DebugOTLPTraceExporter extends OTLPTraceExporter {
-  send(objects, onSuccess, onError) {
-    console.log('Attempting to export traces:', {
-      spanCount: objects.length,
-      endpoint: this.url
+  try {
+    // Create sampler
+    const samplingRate = parseFloat(process.env.OTEL_SAMPLING_RATE || '1.0');
+    logger.info(`Creating sampler with rate: ${samplingRate}`);
+    const sampler = new ParentBasedSampler({
+      root: new TraceIdRatioBased(samplingRate)
     });
 
-    const wrappedSuccess = () => {
-      console.log(`Successfully exported ${objects.length} spans`);
-      onSuccess();
-    };
+    // Create resource
+    logger.info('Creating OpenTelemetry resource...');
+    const resource = new Resource({
+      [SemanticResourceAttributes.SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || 'api-testing-ui',
+      [SemanticResourceAttributes.SERVICE_VERSION]: process.env.OTEL_SERVICE_VERSION || '1.0.0',
+    });
 
-    const wrappedError = (error) => {
-      console.error('Failed to export traces:', {
-        error: error.message,
-        stack: error.stack,
-        code: error.code,
-        details: error.details
+    // Create exporter
+    logger.info('Creating OTLP exporter...');
+    const exporter = new OTLPTraceExporter({
+      url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+      headers: process.env.OTEL_EXPORTER_OTLP_HEADERS ? JSON.parse(process.env.OTEL_EXPORTER_OTLP_HEADERS) : {},
+    });
+
+    // Get auto instrumentations with individual control
+    logger.info('Loading auto instrumentations...');
+    const instrumentations = getNodeAutoInstrumentations({
+      '@opentelemetry/instrumentation-http': {
+        enabled: process.env.OTEL_INSTRUMENT_HTTP === 'true',
+      },
+      '@opentelemetry/instrumentation-express': {
+        enabled: process.env.OTEL_INSTRUMENT_EXPRESS === 'true',
+      },
+      '@opentelemetry/instrumentation-mongodb': {
+        enabled: process.env.OTEL_INSTRUMENT_MONGODB === 'true',
+      },
+      '@opentelemetry/instrumentation-axios': {
+        enabled: process.env.OTEL_INSTRUMENT_AXIOS === 'true',
+      },
+    });
+
+    const enabledInstrumentations = instrumentations
+      .filter(i => i.enabled)
+      .map(i => i.instrumentationName);
+    
+    logger.info('Enabled instrumentations:', enabledInstrumentations);
+
+    // Initialize SDK
+    logger.info('Initializing OpenTelemetry SDK...');
+    const sdk = new opentelemetry.NodeSDK({
+      resource,
+      sampler,
+      spanProcessor: new SimpleSpanProcessor(exporter),
+      instrumentations,
+    });
+
+    // Start SDK
+    logger.info('Starting OpenTelemetry SDK...');
+    sdk.start()
+      .then(() => {
+        logger.info('OpenTelemetry SDK started successfully');
+        logger.info('Tracing enabled for:', {
+          http: process.env.OTEL_INSTRUMENT_HTTP === 'true',
+          express: process.env.OTEL_INSTRUMENT_EXPRESS === 'true',
+          mongodb: process.env.OTEL_INSTRUMENT_MONGODB === 'true',
+          axios: process.env.OTEL_INSTRUMENT_AXIOS === 'true'
+        });
+      })
+      .catch((error) => {
+        logger.error('Error starting OpenTelemetry SDK:', error);
       });
-      onError(error);
-    };
 
-    return super.send(objects, wrappedSuccess, wrappedError);
-  }
-}
+    // Graceful shutdown
+    process.on('SIGTERM', () => {
+      logger.info('Received SIGTERM. Shutting down OpenTelemetry SDK...');
+      sdk.shutdown()
+        .then(() => {
+          logger.info('OpenTelemetry SDK shut down successfully');
+          process.exit(0);
+        })
+        .catch((error) => {
+          logger.error('Error shutting down OpenTelemetry SDK:', error);
+          process.exit(1);
+        });
+    });
 
-// Create the OTLP exporter
-const otlpExporter = new DebugOTLPTraceExporter({
-  url: `${process.env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces`,
-  headers: parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
-  timeoutMillis: 10000,
-  concurrencyLimit: 10
-});
-
-// Initialize the SDK
-const sdk = new NodeSDK({
-  resource: new Resource({
-    [SemanticResourceAttributes.SERVICE_NAME]: 'api-testing-ui',
-    [SemanticResourceAttributes.SERVICE_VERSION]: '1.0.0',
-  }),
-  sampler: sampler,
-  spanProcessors: [new BatchSpanProcessor(otlpExporter, {
-    maxQueueSize: 2048,
-    scheduledDelayMillis: 5000,
-    exportTimeoutMillis: 30000,
-  })],
-  instrumentations: [
-    getNodeAutoInstrumentations({
-      '@opentelemetry/instrumentation-http': { enabled: true },
-      '@opentelemetry/instrumentation-express': { enabled: true },
-      '@opentelemetry/instrumentation-mongodb': { enabled: true },
-    }),
-  ],
-});
-
-// Start the SDK only if it hasn't been started yet
-if (!global.__OPENTELEMETRY_SDK_STARTED__) {
-  try {
-    sdk.start();
-    console.log('OpenTelemetry SDK started successfully');
-    global.__OPENTELEMETRY_SDK_STARTED__ = true;
   } catch (error) {
-    console.error('Error starting OpenTelemetry SDK:', error);
+    logger.error('Failed to initialize OpenTelemetry:', error);
   }
 }
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  sdk
-    .shutdown()
-    .then(() => console.log('Tracing terminated'))
-    .catch((error) => console.log('Error terminating tracing', error))
-    .finally(() => process.exit(0));
-});
-
-module.exports = sdk; 
+module.exports = { initTracing }; 

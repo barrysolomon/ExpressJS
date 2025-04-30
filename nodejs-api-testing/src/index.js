@@ -10,6 +10,9 @@ const axios = require('axios');
 // Initialize OpenTelemetry tracing
 require('./utils/tracing');
 
+// Import HTTP logger middleware
+const httpLogger = require('./middleware/httpLogger');
+
 // Create logger with default configuration
 const logger = pino();
 
@@ -42,39 +45,8 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Request logging middleware
-app.use((req, res, next) => {
-    const startTime = Date.now();
-    
-    // Log request
-    logger.info('Incoming request', {
-        method: req.method,
-        url: req.url,
-        headers: req.headers,
-        body: req.body,
-        timestamp: new Date().toISOString()
-    });
-
-    // Capture response
-    const originalSend = res.send;
-    res.send = function (body) {
-        const responseTime = Date.now() - startTime;
-        
-        // Log response
-        logger.info('Outgoing response', {
-            method: req.method,
-            url: req.url,
-            statusCode: res.statusCode,
-            responseTime: `${responseTime}ms`,
-            body: body,
-            timestamp: new Date().toISOString()
-        });
-
-        return originalSend.call(this, body);
-    };
-
-    next();
-});
+// Use HTTP logger middleware
+app.use(httpLogger);
 
 // Render main page
 app.get('/', (req, res) => {
