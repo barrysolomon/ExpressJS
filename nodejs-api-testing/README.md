@@ -1,191 +1,181 @@
-# API Testing UI
+# API Testing Tool
 
-A web application for testing API calls with MongoDB integration and Kubernetes deployment.
+A web-based API testing tool built with Node.js, Express, and MongoDB. This tool allows you to make HTTP requests to any API endpoint and view the responses in a user-friendly interface.
 
 ## Features
 
-- Modern UI for making API requests
-- Support for GET, POST, PUT, DELETE methods
-- Request history stored in MongoDB
-- Kubernetes deployment ready
-- Default test endpoint to JSONPlaceholder API
+- Make HTTP requests (GET, POST, PUT, DELETE)
+- Customize request headers and body
+- View response headers and body
+- Save request history in MongoDB
+- Track request status (pending, completed, failed)
+- Beautiful UI with Bootstrap and CodeMirror
+- Flexible deployment options (Docker, Kubernetes, or standalone)
 
 ## Prerequisites
 
-- Node.js 18+
-- Docker
-- Kubernetes cluster
-- kubectl configured to access your cluster
+- Node.js (v14 or higher) for local development
+- Docker and Docker Compose for containerized deployment
+- Kubernetes cluster (optional) for orchestrated deployment
+- MongoDB (can be deployed separately or as part of the stack)
 
-## Building the Application
+## Deployment Options
+
+The application can be deployed in multiple ways, and different deployment methods can communicate with each other. For example, you can run the application in Kubernetes while connecting to a MongoDB instance running in Docker, or vice versa.
+
+### Option 1: Local Development
 
 1. Install dependencies:
 ```bash
 npm install
 ```
 
-2. Build the Docker image:
-```bash
-docker build -t api-testing-ui:latest .
-```
-
-## Local Development
-
-1. Start MongoDB:
-```bash
-docker run -d -p 27017:27017 --name mongodb mongo:latest
-```
-
-2. Start the application:
+2. Start the development server:
 ```bash
 npm run dev
 ```
 
 The application will be available at `http://localhost:3000`
 
-## Kubernetes Deployment
+### Option 2: Docker Deployment
 
-1. Deploy to the nodejs namespace:
+#### Build the Container
 ```bash
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/mongodb.yaml
+# Build the Docker image
+docker build -t api-testing-tool .
+```
+
+#### Run with External MongoDB
+```bash
+# Run with MongoDB connection (can be a Kubernetes MongoDB service)
+docker run -d \
+  -p 3000:3000 \
+  -e MONGODB_URI=mongodb://your-mongodb-host:27017/api-testing \
+  -e PORT=3000 \
+  --name api-testing \
+  api-testing-tool
+```
+
+#### Run with Docker Compose (includes MongoDB)
+```bash
+# Start the application and MongoDB
+docker-compose up -d
+```
+
+### Option 3: Kubernetes Deployment
+
+The application includes Kubernetes manifests in the `k8s` directory.
+
+#### Deploy Everything in Kubernetes
+```bash
+# Create namespace
+kubectl create namespace nodejs
+
+# Deploy MongoDB and application
+kubectl apply -f k8s/
+```
+
+#### Deploy Only the Application (with External MongoDB)
+```bash
+# Create namespace
+kubectl create namespace nodejs
+
+# Deploy only the application
 kubectl delete -f k8s/app.yaml
 kubectl apply -f k8s/app.yaml
 ```
 
-2. Get the application URL:
+## Cross-Environment Communication
+
+The application can communicate between different deployment environments. Here are some common scenarios:
+
+### 1. Kubernetes App → Docker MongoDB
 ```bash
-kubectl get service -n nodejs api-testing-ui
+# Run MongoDB in Docker
+docker run -d \
+  -p 27017:27017 \
+  --name mongodb \
+  mongo:latest
+
+# Deploy app to Kubernetes with Docker MongoDB connection
+kubectl apply -f k8s/app.yaml
+# Update MONGODB_URI in the deployment to point to your Docker MongoDB
 ```
 
-The application will be available at the LoadBalancer IP (e.g., `http://198.19.249.2`)
-
-## Lumigo Tracing
-
+### 2. Docker App → Kubernetes MongoDB
 ```bash
-helm repo add lumigo https://lumigo-io.github.io/lumigo-kubernetes-operator && \
-helm repo update && \
-echo "
-cluster:
-  name: TestCluster
-lumigoToken:
-  value: t_f8f7b905da964eef89261
-monitoredNamespaces:
-  - namespace: nodejs
-    loggingEnabled: true
-    tracingEnabled: true
-  - namespace: python
-    loggingEnabled: true
-    tracingEnabled: true
-" | helm upgrade -i lumigo lumigo/lumigo-operator --namespace lumigo-system --create-namespace --values -
+# Deploy MongoDB to Kubernetes
+kubectl apply -f k8s/mongodb.yaml
+
+# Run app in Docker with Kubernetes MongoDB connection
+docker run -d \
+  -p 3000:3000 \
+  -e MONGODB_URI=mongodb://mongodb.nodejs.svc.cluster.local:27017/api-testing \
+  -e PORT=3000 \
+  --name api-testing \
+  api-testing-tool
 ```
-
-Response should be
-
-```bash
-1. create a secret with a Lumigo token in that namespace:
-
-  $ kubectl create secret generic --namespace <NAMESPACE> lumigo-credentials --from-literal token=<LUMIGO_TOKEN>
-
-  To retrieve your Lumigo token, refer to: https://docs.lumigo.io/docs/lumigo-tokens.
-
-2. create a 'Lumigo' resource in that namespace:
-
-  $ echo '{
-      "apiVersion": "operator.lumigo.io/v1alpha1",
-      "kind": "Lumigo",
-      "metadata": {
-        "name": "lumigo"
-      },
-      "spec": {
-        "lumigoToken": {
-          "secretRef": {
-            "name": "lumigo-credentials",
-            "key": "token"
-          } 
-        }
-      }
-    }' | kubectl apply -f - --namespace <NAMESPACE>
-
-For more information on how to configure the Lumigo operator, refer to: https://github.com/lumigo-io/lumigo-kubernetes-operator
-
-(To turn off ANSI colors in the output, set the 'output.color' value to 'false')
-```
-
-
-## Debugging
-
-### Common Issues
-
-1. **MongoDB Connection Issues**
-   - Check MongoDB pod status:
-     ```bash
-     kubectl get pods -n nodejs -l app=mongodb
-     ```
-   - View MongoDB logs:
-     ```bash
-     kubectl logs -n nodejs -l app=mongodb
-     ```
-
-2. **Application Issues**
-   - Check application pod status:
-     ```bash
-     kubectl get pods -n nodejs -l app=api-testing-ui
-     ```
-   - View application logs:
-     ```bash
-     kubectl logs -n nodejs -l app=api-testing-ui
-     ```
-
-3. **Service Issues**
-   - Check service status:
-     ```bash
-     kubectl get svc -n nodejs
-     ```
-   - Check endpoints:
-     ```bash
-     kubectl get endpoints -n nodejs
-     ```
-
-### Useful Commands
-
-- View all resources in nodejs namespace:
-  ```bash
-  kubectl get all -n nodejs
-  ```
-
-- View pod details:
-  ```bash
-  kubectl describe pod -n nodejs <pod-name>
-  ```
-
-- Access application shell:
-  ```bash
-  kubectl exec -n nodejs -it <pod-name> -- /bin/sh
-  ```
-
-- View MongoDB data:
-  ```bash
-  kubectl exec -n nodejs -it <mongodb-pod-name> -- mongosh api-testing
-  ```
-
-## Architecture
-
-- Express.js backend
-- MongoDB for data storage
-- EJS templating for the UI
-- Bootstrap for styling
-- Kubernetes for orchestration
-- NodeJS namespace for isolation
 
 ## Environment Variables
 
-- `MONGODB_URI`: MongoDB connection string (default: mongodb://mongodb.nodejs.svc.cluster.local:27017/api-testing)
-- `PORT`: Application port (default: 3000)
+- `PORT`: The port the application runs on (default: 3000)
+- `MONGODB_URI`: MongoDB connection string (required for database mode)
+- `LOG_LEVEL`: Logging level (default: 'info')
+
+## Troubleshooting
+
+### MongoDB Connection Issues
+
+1. Check MongoDB status:
+```bash
+# For Docker
+docker ps | grep mongodb
+docker logs mongodb
+
+# For Kubernetes
+kubectl get pods -n nodejs -l app=mongodb
+kubectl logs -n nodejs -l app=mongodb
+```
+
+2. Test MongoDB connection:
+```bash
+# For Docker
+docker exec -it mongodb mongosh
+
+# For Kubernetes
+kubectl exec -n nodejs -it $(kubectl get pod -n nodejs -l app=mongodb -o jsonpath="{.items[0].metadata.name}") -- mongosh
+```
+
+### Application Issues
+
+1. Check application status:
+```bash
+# For Docker
+docker ps | grep api-testing
+docker logs api-testing
+
+# For Kubernetes
+kubectl get pods -n nodejs -l app=api-testing-ui
+kubectl logs -n nodejs -l app=api-testing-ui
+```
+
+2. Verify environment variables:
+```bash
+# For Docker
+docker exec api-testing env | grep MONGODB_URI
+
+# For Kubernetes
+kubectl exec -n nodejs -it $(kubectl get pod -n nodejs -l app=api-testing-ui -o jsonpath="{.items[0].metadata.name}") -- env | grep MONGODB_URI
+```
 
 ## API Endpoints
 
+- `GET /`: Main application interface
 - `POST /api/test`: Make an API request
-- `GET /api/requests`: Get request history
-- `GET /api/requests/:id`: Get specific request details
-- `GET /`: Main UI 
+- `GET /api/history`: Get request history
+- `DELETE /api/history`: Clear request history
+- `DELETE /api/requests/:id`: Delete a specific request
+
+## License
+
+MIT 
