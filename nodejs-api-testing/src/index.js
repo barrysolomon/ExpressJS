@@ -7,6 +7,9 @@ const fs = require('fs');
 const mongoose = require('mongoose');
 const axios = require('axios');
 
+// Initialize OpenTelemetry tracing
+require('./utils/tracing');
+
 // Create logger with default configuration
 const logger = pino();
 

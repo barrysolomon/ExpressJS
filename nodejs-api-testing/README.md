@@ -35,6 +35,16 @@ npm install
 npm run dev
 ```
 
+2a. Start the development server (with OTEL, Sampling 20%):
+```bash
+OTEL_ENABLED=true OTEL_SAMPLING_RATE=0.2 OTEL_EXPORTER_OTLP_ENDPOINT=https://ga-otlp.lumigo-tracer-edge.golumigo.com OTEL_EXPORTER_OTLP_HEADERS="Authorization=LumigoToken t_f8f7b905da964eef89261" OTEL_EXPORTER_OTLP_METRICS_ENABLED=false npm run dev
+```
+
+2b. Start the development server (without OTEL):
+```bash
+OTEL_ENABLED=false OTEL_SAMPLING_RATE=1.0 OTEL_EXPORTER_OTLP_ENDPOINT=https://ga-otlp.lumigo-tracer-edge.golumigo.com OTEL_EXPORTER_OTLP_HEADERS="Authorization=LumigoToken t_f8f7b905da964eef89261" OTEL_EXPORTER_OTLP_METRICS_ENABLED=false npm run dev
+```
+
 The application will be available at `http://localhost:3000`
 
 ### Option 2: Docker Deployment
