@@ -65,11 +65,11 @@ spec:
         
         # Sampling Configuration
         - name: OTEL_SAMPLING_RATE
-          value: "0.2"
+          value: "1.0"
         - name: OTEL_TRACES_SAMPLER
           value: "traceidratio"
         - name: OTEL_TRACES_SAMPLER_ARG
-          value: "0.2"
+          value: "1.0"
         
         # OTLP Exporter Configuration
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
