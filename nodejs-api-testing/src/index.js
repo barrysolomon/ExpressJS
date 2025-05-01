@@ -1,14 +1,11 @@
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
-require('dotenv').config();
 const pino = require('pino');
 const fs = require('fs');
 const mongoose = require('mongoose');
 const axios = require('axios');
-
-// Initialize OpenTelemetry tracing
-require('./utils/tracing');
 
 // Import HTTP logger middleware
 const httpLogger = require('./middleware/httpLogger');
@@ -33,6 +30,10 @@ logger.info('Version information', {
     appVersion,
     envVersion: process.env.VERSION
 });
+
+// Initialize OpenTelemetry tracing after logger is configured
+const { initTracing } = require('./utils/tracing');
+initTracing();
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -379,6 +380,7 @@ if (mongoUri) {
 app.post('/api/test', async (req, res) => {
     const requestId = Date.now().toString();
     const startTime = Date.now();
+    let dbRequest = null;
     
     try {
         const { method, url, headers, body } = req.body;
@@ -401,7 +403,7 @@ app.post('/api/test', async (req, res) => {
             logger.warn('Failed to parse body, using as is');
         }
 
-        // Log outgoing request
+        // Log outgoing request with detailed tracing
         logger.info('Making outgoing request', {
             type: 'outgoing_request',
             requestId,
@@ -409,11 +411,16 @@ app.post('/api/test', async (req, res) => {
             url,
             headers: parsedHeaders,
             body: parsedBody,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            trace: {
+                startTime,
+                requestId,
+                method,
+                url
+            }
         });
 
         // Save initial request to database if MongoDB is available
-        let dbRequest = null;
         if (mongoUri) {
             try {
                 const Request = require('./models/request');
@@ -431,7 +438,7 @@ app.post('/api/test', async (req, res) => {
                     status: 'pending'
                 });
                 await dbRequest.save();
-                logger.info('Saved initial request to database', { requestId: dbRequest._id });
+                logger.debug('Saved initial request to database', { requestId: dbRequest._id });
             } catch (err) {
                 logger.error('Failed to save initial request to database', { error: err.message });
             }
@@ -475,7 +482,7 @@ app.post('/api/test', async (req, res) => {
             responseData = await response.text();
         }
 
-        // Log response
+        // Log response with detailed tracing
         logger.info('Received response', {
             type: 'outgoing_response',
             requestId,
@@ -485,7 +492,16 @@ app.post('/api/test', async (req, res) => {
             responseTime: `${responseTime}ms`,
             headers: Object.fromEntries(response.headers.entries()),
             body: responseData,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            trace: {
+                startTime,
+                endTime,
+                duration: responseTime,
+                requestId,
+                method,
+                url,
+                statusCode: response.status
+            }
         });
 
         // Update request in database if MongoDB is available
@@ -498,7 +514,7 @@ app.post('/api/test', async (req, res) => {
                 };
                 dbRequest.status = 'completed';
                 await dbRequest.save();
-                logger.info('Updated request in database', { requestId: dbRequest._id });
+                logger.debug('Updated request in database', { requestId: dbRequest._id });
             } catch (err) {
                 logger.error('Failed to update request in database', { error: err.message });
             }
@@ -515,7 +531,7 @@ app.post('/api/test', async (req, res) => {
         const endTime = Date.now();
         const responseTime = endTime - startTime;
 
-        // Log error
+        // Log error with detailed tracing
         logger.error('Request failed', {
             type: 'error',
             requestId,
@@ -524,7 +540,16 @@ app.post('/api/test', async (req, res) => {
             error: error.message,
             stack: error.stack,
             responseTime: `${responseTime}ms`,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            trace: {
+                startTime,
+                endTime,
+                duration: responseTime,
+                requestId,
+                method: req.body.method,
+                url: req.body.url,
+                error: error.message
+            }
         });
 
         // Update failed request in database if MongoDB is available
@@ -537,7 +562,7 @@ app.post('/api/test', async (req, res) => {
                 };
                 dbRequest.status = 'failed';
                 await dbRequest.save();
-                logger.info('Updated failed request in database', { requestId: dbRequest._id });
+                logger.debug('Updated failed request in database', { requestId: dbRequest._id });
             } catch (err) {
                 logger.error('Failed to update failed request in database', { error: err.message });
             }
@@ -551,13 +576,20 @@ app.post('/api/test', async (req, res) => {
     }
 });
 
-app.listen(port, () => {
-    logger.info('Server started', {
-        type: 'server_start',
-        port,
-        nodeVersion,
-        expressVersion,
-        appVersion,
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        uptime: process.uptime(),
         timestamp: new Date().toISOString()
+    });
+});
+
+// Start the server
+const server = app.listen(port, () => {
+    logger.info('Server started', {
+        port,
+        mode: process.env.NODE_ENV || 'development',
+        mongoUri: mongoUri ? 'Database Mode' : 'File System Mode'
     });
 }); 

@@ -8,15 +8,19 @@ function httpLogger(req, res, next) {
   const start = Date.now();
   const requestId = req.headers['x-request-id'] || Math.random().toString(36).substring(7);
 
+  // Use INFO level for API calls, DEBUG for health checks
+  const logLevel = req.url === '/health' ? 'debug' : 'info';
+  
   // Log request
-  logger.info('Incoming HTTP Request', {
+  logger[logLevel]('Incoming HTTP Request', {
     requestId,
     method: req.method,
     url: req.url,
     headers: req.headers,
     query: req.query,
     body: req.body,
-    ip: req.ip
+    ip: req.ip,
+    timestamp: new Date().toISOString()
   });
 
   // Capture response
@@ -25,12 +29,13 @@ function httpLogger(req, res, next) {
     const responseTime = Date.now() - start;
     
     // Log response
-    logger.info('Outgoing HTTP Response', {
+    logger[logLevel]('Outgoing HTTP Response', {
       requestId,
       statusCode: res.statusCode,
       responseTime: `${responseTime}ms`,
       headers: res.getHeaders(),
-      body: body
+      body: body,
+      timestamp: new Date().toISOString()
     });
 
     return originalSend.call(this, body);

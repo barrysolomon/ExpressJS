@@ -1,29 +1,32 @@
 const pino = require('pino');
-const path = require('path');
 
-// Determine if we're running in a container
-const isContainer = process.env.CONTAINER_ENV === 'true';
-
-// Set up the transport configuration based on environment
-const transportConfig = isContainer
-  ? {
-      target: 'pino/file',
-      options: {
-        destination: '/app/logs/app.log',
-        mkdir: true
-      }
-    }
-  : {
-      target: 'pino/file',
-      options: {
-        destination: path.join(process.cwd(), 'logs', 'app.log'),
-        mkdir: true
-      }
-    };
-
+// Create logger with direct stdout output
 const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  transport: transportConfig
+  level: (process.env.LOG_LEVEL || 'info').toLowerCase(),
+  customLevels: {
+    fatal: 60,
+    error: 50,
+    warn: 40,
+    info: 30,
+    debug: 20,
+    trace: 10
+  },
+  base: null,
+  timestamp: () => `,"time":"${new Date().toISOString()}"`,
+  formatters: {
+    level: (label) => {
+      return { level: label.toUpperCase() };
+    }
+  }
+});
+
+// Log initial configuration
+logger.info({
+  msg: 'Logger initialized',
+  config: {
+    level: logger.level,
+    environment: process.env.NODE_ENV || 'development'
+  }
 });
 
 module.exports = logger; 
