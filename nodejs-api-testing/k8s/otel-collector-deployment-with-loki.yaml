@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: otel-collector
+  name: otel-collector
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+      - args:
+        - --config=/etc/otel/config.yaml
+        - --set=service.telemetry.logs.level=debug
+        # Using a specific version of the contrib image that includes the Loki exporter
+        image: otel/opentelemetry-collector-contrib:0.96.0
+        name: otel-collector
+        ports:
+        - containerPort: 4317
+          protocol: TCP
+          name: otlp-grpc
+        - containerPort: 4318
+          protocol: TCP
+          name: otlp-http
+        - containerPort: 8888
+          protocol: TCP
+          name: metrics
+        - containerPort: 8889
+          protocol: TCP
+          name: prom-export
+        resources:
+          limits:
+            cpu: 500m
+            memory: 2Gi
+          requests:
+            cpu: 200m
+            memory: 1Gi
+        volumeMounts:
+        - mountPath: /etc/otel/config.yaml
+          name: otel-config
+          subPath: config.yaml
+      volumes:
+      - configMap:
+          name: otel-collector-config
+        name: otel-config 

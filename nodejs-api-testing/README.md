@@ -91,9 +91,13 @@ kubectl apply -f k8s/
 kubectl create namespace nodejs
 
 # Deploy only the application
+docker build -t api-testing-tool .
 kubectl delete -f k8s/app.yaml
 kubectl apply -f k8s/app.yaml
 ```
+
+kubectl wait --for=condition=available --timeout=300s deployment/mongodb -n nodejs
+kubectl wait --for=condition=available --timeout=300s deployment/api-testing-ui -n nodejs
 
 ## Cross-Environment Communication
 

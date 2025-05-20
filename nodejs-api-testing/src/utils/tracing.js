@@ -39,8 +39,19 @@ const activeSpansGauge = meter.createUpDownCounter('otlp.active.spans', {
 // Create a tracer instance
 let tracer;
 
+// Initialize tracer based on OTEL_ENABLED
+if (process.env.OTEL_ENABLED !== 'true') {
+  tracer = trace.getTracer('no-op-tracer');
+} else {
+  tracer = trace.getTracer('api-testing-tracer');
+}
+
 // Function to create a parent span for API operations
 function createAPIOperationSpan(operationName, attributes = {}) {
+  if (process.env.OTEL_ENABLED !== 'true') {
+    return context.active();
+  }
+
   const currentSpan = trace.getSpan(context.active());
   const parentContext = currentSpan ? trace.setSpan(context.active(), currentSpan) : context.active();
   
@@ -61,6 +72,10 @@ function createAPIOperationSpan(operationName, attributes = {}) {
 
 // Function to create a mock database span for testing
 function createMockDatabaseSpan(parentContext, operationName) {
+  if (process.env.OTEL_ENABLED !== 'true') {
+    return null;
+  }
+
   const span = tracer.startSpan(
     `mongodb.${operationName}`,
     {
@@ -80,6 +95,10 @@ function createMockDatabaseSpan(parentContext, operationName) {
 
 // Function to wrap an async operation with a parent span
 async function wrapWithSpan(operationName, attributes = {}, operation) {
+  if (process.env.OTEL_ENABLED !== 'true') {
+    return operation();
+  }
+
   const currentSpan = trace.getSpan(context.active());
   const parentContext = currentSpan ? trace.setSpan(context.active(), currentSpan) : context.active();
   
@@ -472,14 +491,13 @@ function logEnvironmentVariables() {
 function initTracing() {
   if (process.env.OTEL_ENABLED !== 'true') {
     logger.info('OpenTelemetry tracing is disabled');
-    return;
+    return Promise.resolve();
   }
 
   logEnvironmentVariables();
 
   try {
     // Create a test span to verify tracing is working
-    tracer = trace.getTracer('api-testing-tracer');
     const testSpan = tracer.startSpan('test-span');
     testSpan.setAttribute('test.attribute', 'test-value');
     testSpan.end();
@@ -639,7 +657,7 @@ function initTracing() {
         [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: process.env.NODE_ENV || 'production'
       }),
       spanProcessor: spanProcessor,
-      sampler: new TraceIdRatioBasedSampler(1.0),
+      sampler: new TraceIdRatioBasedSampler(config.samplingRate),
       instrumentations: [
         new HttpInstrumentation({
           enabled: process.env.OTEL_INSTRUMENT_HTTP === 'true',

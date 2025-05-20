@@ -55,7 +55,7 @@ spec:
         
         # OpenTelemetry Basic Configuration
         - name: OTEL_ENABLED
-          value: "true"
+          value: "false"
         - name: OTEL_SERVICE_NAME
           value: "api-testing-ui"
         - name: OTEL_SERVICE_VERSION
@@ -73,7 +73,13 @@ spec:
         
         # OTLP Exporter Configuration
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: "https://ga-otlp.lumigo-tracer-edge.golumigo.com"
+          value: "http://otel-collector.observability.svc.cluster.local:4318"
+
+        # #  value: "https://ga-otlp.lumigo-tracer-edge.golumigo.com"
+        # #  value: "http://otel-collector.observability.svc.cluster.local:4318"
+        # #  value: "http://lumigo-lumigo-operator-telemetry-proxy-service.lumigo-system.svc.cluster.local"
+          
+          
         - name: OTEL_EXPORTER_OTLP_HEADERS
           value: "Authorization=LumigoToken t_f8f7b905da964eef89261"
         - name: OTEL_EXPORTER_OTLP_COMPRESSION
