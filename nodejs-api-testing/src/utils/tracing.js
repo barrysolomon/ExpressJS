@@ -10,6 +10,9 @@ const { metrics, ValueType } = require('@opentelemetry/api-metrics');
 const { MeterProvider } = require('@opentelemetry/sdk-metrics');
 const { OTLPMetricExporter } = require('@opentelemetry/exporter-metrics-otlp-http');
 const { PeriodicExportingMetricReader } = require('@opentelemetry/sdk-metrics');
+const { OTLPLogExporter } = require('@opentelemetry/exporter-logs-otlp-http');
+const { LoggerProvider, SimpleLogRecordProcessor } = require('@opentelemetry/sdk-logs');
+const { logs } = require('@opentelemetry/api-logs');
 const logger = require('./logger');
 const { trace, context, SpanKind, SpanStatusCode } = require('@opentelemetry/api');
 
@@ -490,172 +493,78 @@ function logEnvironmentVariables() {
 
 async function initTracing() {
   if (process.env.OTEL_ENABLED !== 'true') {
-    logger.info('OpenTelemetry tracing is disabled');
-    // Initialize a no-op tracer when tracing is disabled
-    tracer = trace.getTracer('no-op-tracer');
-    return Promise.resolve();
+    logger.info('OpenTelemetry is disabled');
+    return;
   }
 
-  logEnvironmentVariables();
-
-  // Define configuration object
-  const config = {
-    serviceName: process.env.OTEL_SERVICE_NAME || 'api-testing-ui',
-    serviceVersion: process.env.OTEL_SERVICE_VERSION || '1.0.7',
-    environment: process.env.NODE_ENV || 'production',
-    samplingRate: process.env.OTEL_SAMPLING_RATE || '1.0',
-    enabledInstrumentations: {
-      http: process.env.OTEL_INSTRUMENT_HTTP === 'true',
-      express: process.env.OTEL_INSTRUMENT_EXPRESS === 'true',
-      mongodb: process.env.OTEL_INSTRUMENT_MONGODB === 'true'
-    }
-  };
-
   try {
-    // Create a test span to verify tracing is working
-    const testSpan = tracer.startSpan('test-span');
-    testSpan.setAttribute('test.attribute', 'test-value');
-    testSpan.end();
-
-    logger.info({
-      msg: 'Created test span',
-      span: {
-        name: testSpan.name,
-        traceId: testSpan.spanContext().traceId,
-        spanId: testSpan.spanContext().spanId
-      }
+    // Create a resource with service information
+    const resource = new Resource({
+      [SemanticResourceAttributes.SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || 'api-testing-tool',
+      [SemanticResourceAttributes.SERVICE_VERSION]: process.env.OTEL_SERVICE_VERSION || '1.0.7',
+      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: process.env.NODE_ENV || 'production'
     });
 
-    // Log exporter configuration before creation
-    logger.info({
-      msg: 'Creating OTLP Trace Exporter',
-      config: {
-        endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-        hasAuthHeader: !!process.env.OTEL_EXPORTER_OTLP_HEADERS,
-        compression: 'gzip'
-      }
+    // Initialize the Logger Provider
+    const loggerProvider = new LoggerProvider({
+      resource: resource
     });
 
-    const traceExporter = new OTLPTraceExporter({
-      url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT + '/v1/traces',
-      headers: process.env.OTEL_EXPORTER_OTLP_HEADERS ? {
-        'Authorization': process.env.OTEL_EXPORTER_OTLP_HEADERS.split('=')[1],
-        'Content-Type': 'application/json'
-      } : {},
-      compression: 'gzip',
-      timeoutMillis: 30000,
-      concurrencyLimit: 1,
-      keepAlive: true,
-      httpAgentOptions: {
-        keepAlive: true,
-        keepAliveMsecs: 20000,
-        maxSockets: 10
-      }
+    // Create and configure the OTLP log exporter
+    const logExporter = new OTLPLogExporter({
+      url: `${process.env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/logs`
     });
 
-    // Create span processor first with more aggressive settings
-    const spanProcessor = new LoggingBatchSpanProcessor(traceExporter, {
-      maxQueueSize: parseInt(process.env.OTEL_BSP_MAX_QUEUE_SIZE || '2048'),
-      scheduledDelayMillis: parseInt(process.env.OTEL_BSP_SCHEDULE_DELAY || '500'),
-      exportTimeoutMillis: parseInt(process.env.OTEL_BSP_EXPORT_TIMEOUT || '30000'),
-      maxExportBatchSize: parseInt(process.env.OTEL_BSP_MAX_EXPORT_BATCH_SIZE || '512')
-    });
+    // Add the log processor to the logger provider
+    loggerProvider.addLogRecordProcessor(
+      new SimpleLogRecordProcessor(logExporter)
+    );
 
-    // Log SDK configuration before creation
-    logger.info({
-      msg: 'Creating OpenTelemetry SDK',
-      config: config
-    });
+    // Set the global logger provider
+    logs.setGlobalLoggerProvider(loggerProvider);
 
+    // Create the SDK instance
     const sdk = new NodeSDK({
-      resource: new Resource({
-        [SemanticResourceAttributes.SERVICE_NAME]: config.serviceName,
-        [SemanticResourceAttributes.SERVICE_VERSION]: config.serviceVersion,
-        [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: config.environment
+      resource: resource,
+      traceExporter: new OTLPTraceExporter({
+        url: `${process.env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces`
       }),
-      spanProcessor: spanProcessor,
-      sampler: new TraceIdRatioBasedSampler(parseFloat(config.samplingRate)),
+      metricReader: new PeriodicExportingMetricReader({
+        exporter: new OTLPMetricExporter({
+          url: `${process.env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/metrics`
+        }),
+        exportIntervalMillis: 1000
+      }),
       instrumentations: [
-        new HttpInstrumentation({
-          enabled: config.enabledInstrumentations.http,
-          ignoreIncomingRequestHook: (request) => {
-            return request.url === '/health';
-          },
-          ignoreOutgoingRequestHook: (request) => {
-            return false;
-          },
-          applyCustomAttributesOnSpan: (span, request, response) => {
-            const currentSpan = trace.getSpan(context.active());
-            span.setAttribute('http.request.method', request.method);
-            span.setAttribute('http.request.url', request.url);
-            if (response) {
-              span.setAttribute('http.response.status_code', response.statusCode);
-            }
-            if (currentSpan) {
-              span.setParent(currentSpan);
-            }
-          }
-        }),
-        new ExpressInstrumentation({
-          enabled: config.enabledInstrumentations.express,
-          requestHook: (span, req) => {
-            const currentSpan = trace.getSpan(context.active());
-            span.setAttribute('http.route', req.route?.path || 'unknown');
-            span.setAttribute('http.method', req.method);
-            span.setAttribute('http.url', req.url);
-            if (currentSpan?.attributes['ui.action']) {
-              span.setAttribute('ui.action', currentSpan.attributes['ui.action']);
-            }
-            if (currentSpan) {
-              span.setParent(currentSpan);
-            }
-          }
-        }),
-        new MongoDBInstrumentation({
-          enabled: config.enabledInstrumentations.mongodb,
-          enhancedDatabaseReporting: true,
-          applyCustomAttributesOnSpan: (span, operation, attributes) => {
-            const currentSpan = trace.getSpan(context.active());
-            span.setAttribute('db.operation', operation);
-            span.setAttribute('db.system', 'mongodb');
-            span.setAttribute('db.name', attributes.dbName || 'unknown');
-            span.setAttribute('db.collection', attributes.collection || 'unknown');
-            if (currentSpan?.attributes['ui.action']) {
-              span.setAttribute('ui.action', currentSpan.attributes['ui.action']);
-            }
-            if (currentSpan) {
-              span.setParent(currentSpan);
-            }
-          }
-        })
-      ]
+        new HttpInstrumentation(),
+        new ExpressInstrumentation(),
+        new MongoDBInstrumentation()
+      ],
+      sampler: new TraceIdRatioBasedSampler(1.0)
     });
 
-    try {
-      await sdk.start();
-      logger.info('OpenTelemetry SDK started successfully');
-      return Promise.resolve();
-    } catch (error) {
-      logger.error({
-        msg: 'Error starting OpenTelemetry SDK',
-        error: {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
-        }
-      });
-      return Promise.reject(error);
-    }
+    // Start the SDK
+    await sdk.start();
+    logger.info('OpenTelemetry SDK started successfully');
+
+    // Log a test message to verify logging is working
+    const testLogger = logs.getLogger('api-testing-tool');
+    testLogger.emit({
+      severityText: 'INFO',
+      body: 'OpenTelemetry logging initialized',
+      attributes: {
+        'service.name': process.env.OTEL_SERVICE_NAME || 'api-testing-tool',
+        'service.version': process.env.OTEL_SERVICE_VERSION || '1.0.7',
+        'environment': process.env.NODE_ENV || 'production'
+      }
+    });
+
   } catch (error) {
     logger.error({
-      msg: 'Error initializing OpenTelemetry SDK',
-      error: {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      }
+      msg: 'Failed to initialize OpenTelemetry',
+      error: error.message,
+      stack: error.stack
     });
-    return Promise.reject(error);
   }
 }
 

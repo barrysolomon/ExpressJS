@@ -259,6 +259,7 @@ app.get('/js/app.js', (req, res) => {
                             });
 
                             const data = response.data;
+                            console.log('Response data:', JSON.stringify(data, null, 2));
                             
                             // Update response display
                             const statusCode = document.getElementById('statusCode');
@@ -291,6 +292,7 @@ app.get('/js/app.js', (req, res) => {
 
                             // Add to history
                             addToHistory({
+                                _id: data?.request?.id || data?.request?._id || \`temp_${Date.now()}\`,
                                 method,
                                 url,
                                 headers: parsedHeaders,
@@ -303,6 +305,8 @@ app.get('/js/app.js', (req, res) => {
                                 },
                                 timestamp: new Date()
                             });
+                            // Refresh history immediately
+                            await fetchHistory();
                         } catch (error) {
                             document.getElementById('statusCode').textContent = 'Error';
                             document.getElementById('statusCode').className = 'status-5xx';
@@ -498,115 +502,69 @@ app.post('/api/test', async (req, res) => {
                 // Get the content type from response headers
                 const contentType = response.headers.get('content-type');
                 let responseData;
-
-                // Handle different response types
                 if (contentType && contentType.includes('application/json')) {
-                    try {
-                        responseData = await response.json();
-                    } catch (e) {
-                        // If JSON parsing fails, get the raw text
-                        responseData = await response.text();
-                        logger.warn('Failed to parse JSON response', {
-                            type: 'json_parse_error',
-                            requestId,
-                            error: e.message,
-                            rawResponse: responseData
-                        });
-                    }
+                    responseData = await response.json();
                 } else {
                     responseData = await response.text();
                 }
 
-                // Log response with detailed tracing
-                logger.info('Received response', {
-                    type: 'outgoing_response',
-                    requestId,
-                    method,
-                    url,
-                    statusCode: response.status,
-                    responseTime: `${responseTime}ms`,
-                    headers: Object.fromEntries(response.headers.entries()),
-                    body: responseData,
-                    timestamp: new Date().toISOString(),
-                    trace: {
-                        startTime,
-                        endTime,
-                        duration: responseTime,
-                        requestId,
-                        method,
-                        url,
-                        statusCode: response.status
-                    }
-                });
-
-                // Update request in database if MongoDB is available
-                if (mongoUri && dbRequest) {
-                    try {
-                        dbRequest.response = {
-                            status_code: response.status,
-                            headers: Object.fromEntries(response.headers.entries()),
-                            body: responseData
-                        };
-                        dbRequest.status = 'completed';
-                        await dbRequest.save();
-                        logger.debug('Updated request in database', { requestId: dbRequest._id });
-                    } catch (err) {
-                        logger.error('Failed to update request in database', { error: err.message });
-                    }
+                // Update dbRequest with response if MongoDB is available
+                if (dbRequest) {
+                    dbRequest.response = {
+                        status_code: response.status,
+                        headers: Object.fromEntries(response.headers.entries()),
+                        body: responseData
+                    };
+                    dbRequest.status = 'completed';
+                    await dbRequest.save();
                 }
-                
+
                 res.json({
+                    success: true,
+                    request: dbRequest ? {
+                        id: dbRequest._id.toString(),
+                        url: dbRequest.url,
+                        method: dbRequest.method,
+                        response: dbRequest.response,
+                        timestamp: dbRequest.timestamp
+                    } : null,
                     status: response.status,
-                    time: responseTime,
-                    data: responseData,
                     headers: Object.fromEntries(response.headers.entries()),
-                    contentType: contentType || 'unknown'
+                    data: responseData,
+                    time: responseTime
                 });
             } catch (error) {
-                const endTime = Date.now();
-                const responseTime = endTime - startTime;
-
-                // Log error with detailed tracing
-                logger.error('Request failed', {
-                    type: 'error',
-                    requestId,
-                    method: req.body.method,
-                    url: req.body.url,
-                    error: error.message,
-                    stack: error.stack,
-                    responseTime: `${responseTime}ms`,
-                    timestamp: new Date().toISOString(),
-                    trace: {
-                        startTime,
-                        endTime,
-                        duration: responseTime,
-                        requestId,
-                        method: req.body.method,
-                        url: req.body.url,
-                        error: error.message
-                    }
-                });
-
-                // Update failed request in database if MongoDB is available
-                if (mongoUri && dbRequest) {
+                // Save failed request to database if MongoDB is available
+                if (mongoUri) {
                     try {
-                        dbRequest.response = {
-                            status_code: 500,
-                            headers: {},
-                            body: { error: error.message }
-                        };
-                        dbRequest.status = 'failed';
+                        const Request = require('./models/request');
+                        dbRequest = new Request({
+                            method: req.body.method,
+                            url: req.body.url,
+                            headers: req.body.headers,
+                            body: req.body.body,
+                            response: {
+                                status_code: 500,
+                                headers: {},
+                                body: { error: error.message }
+                            },
+                            timestamp: new Date(),
+                            status: 'failed'
+                        });
                         await dbRequest.save();
-                        logger.debug('Updated failed request in database', { requestId: dbRequest._id });
                     } catch (err) {
-                        logger.error('Failed to update failed request in database', { error: err.message });
+                        logger.error('Failed to save failed request to database', { error: err.message });
                     }
                 }
-
-                res.status(500).json({ 
+                res.status(500).json({
                     error: error.message,
-                    details: error.stack,
-                    type: 'request_error'
+                    request: dbRequest ? {
+                        id: dbRequest._id.toString(),
+                        url: dbRequest.url,
+                        method: dbRequest.method,
+                        response: dbRequest.response,
+                        timestamp: dbRequest.timestamp
+                    } : null
                 });
             }
         }

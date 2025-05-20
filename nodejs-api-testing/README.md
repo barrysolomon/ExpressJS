@@ -1,195 +1,145 @@
 # API Testing Tool
 
-A web-based API testing tool built with Node.js, Express, and MongoDB. This tool allows you to make HTTP requests to any API endpoint and view the responses in a user-friendly interface.
+A modern web-based API testing tool built with Express.js, featuring OpenTelemetry integration for comprehensive observability.
 
 ## Features
 
-- Make HTTP requests (GET, POST, PUT, DELETE)
-- Customize request headers and body
-- View response headers and body
-- Save request history in MongoDB
-- Track request status (pending, completed, failed)
-- Beautiful UI with Bootstrap and CodeMirror
-- Flexible deployment options (Docker, Kubernetes, or standalone)
+- **Modern UI**: Clean, responsive interface built with Bootstrap 5
+- **Real-time Testing**: Test APIs with various HTTP methods (GET, POST, PUT, DELETE)
+- **Request History**: Save and manage your API test history
+- **Header Management**: Easy header configuration with presets
+- **Response Visualization**: Clear display of response status, headers, and body
+- **OpenTelemetry Integration**: Comprehensive observability with traces, metrics, and logs
+- **MongoDB Integration**: Persistent storage of request history
+- **Kubernetes Ready**: Deployable to Kubernetes clusters
 
 ## Prerequisites
 
-- Node.js (v14 or higher) for local development
-- Docker and Docker Compose for containerized deployment
-- Kubernetes cluster (optional) for orchestrated deployment
-- MongoDB (can be deployed separately or as part of the stack)
+- Node.js v18.19.0 or higher
+- MongoDB (optional, for persistent storage)
+- Docker
+- Kubernetes cluster (for deployment)
 
-## Deployment Options
+## Installation
 
-The application can be deployed in multiple ways, and different deployment methods can communicate with each other. For example, you can run the application in Kubernetes while connecting to a MongoDB instance running in Docker, or vice versa.
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd nodejs-api-testing
+```
 
-### Option 1: Local Development
-
-1. Install dependencies:
+2. Install dependencies:
 ```bash
 npm install
 ```
 
-2. Start the development server:
+3. Create a `.env` file with your configuration:
+```env
+# Application Configuration
+NODE_ENV=production
+PORT=3000
+LOG_LEVEL=debug
+MONGODB_URI=mongodb://localhost:27017/api-testing
+
+# OpenTelemetry Configuration
+OTEL_ENABLED=true
+OTEL_SERVICE_NAME=api-testing-tool
+OTEL_SERVICE_VERSION=1.0.7
+OTEL_SAMPLING_RATE=1.0
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=your-token
+
+# Instrumentation Control
+OTEL_INSTRUMENT_HTTP=true
+OTEL_INSTRUMENT_EXPRESS=true
+OTEL_INSTRUMENT_MONGODB=true
+```
+
+## Development
+
+Start the development server:
 ```bash
 npm run dev
 ```
 
-2a. Start the development server (with OTEL, Sampling 20%):
+## Building
+
+Build the Docker image:
 ```bash
-OTEL_ENABLED=true OTEL_SAMPLING_RATE=0.2 OTEL_EXPORTER_OTLP_ENDPOINT=https://ga-otlp.lumigo-tracer-edge.golumigo.com OTEL_EXPORTER_OTLP_HEADERS="Authorization=LumigoToken t_f8f7b905da964eef89261" OTEL_EXPORTER_OTLP_METRICS_ENABLED=false npm run dev
-```
-
-2b. Start the development server (without OTEL):
-```bash
-OTEL_ENABLED=false OTEL_SAMPLING_RATE=1.0 OTEL_EXPORTER_OTLP_ENDPOINT=https://ga-otlp.lumigo-tracer-edge.golumigo.com OTEL_EXPORTER_OTLP_HEADERS="Authorization=LumigoToken t_f8f7b905da964eef89261" OTEL_EXPORTER_OTLP_METRICS_ENABLED=false npm run dev
-```
-
-The application will be available at `http://localhost:3000`
-
-### Option 2: Docker Deployment
-
-#### Build the Container
-```bash
-# Build the Docker image
 docker build -t api-testing-tool .
 ```
 
-#### Run with External MongoDB
+## Deployment
+
+1. Ensure your Kubernetes cluster is running and configured
+2. Deploy the OpenTelemetry collector:
 ```bash
-# Run with MongoDB connection (can be a Kubernetes MongoDB service)
-docker run -d \
-  -p 3000:3000 \
-  -e MONGODB_URI=mongodb://your-mongodb-host:27017/api-testing \
-  -e PORT=3000 \
-  --name api-testing \
-  api-testing-tool
+kubectl apply -f k8s/otel-collector-config-with-loki.yaml
+kubectl apply -f k8s/otel-collector-deployment-with-loki.yaml
+kubectl apply -f k8s/otel-collector-service.yaml
 ```
 
-#### Run with Docker Compose (includes MongoDB)
+3. Deploy the application:
 ```bash
-# Start the application and MongoDB
-docker-compose up -d
-```
-
-### Option 3: Kubernetes Deployment
-
-The application includes Kubernetes manifests in the `k8s` directory.
-
-#### Deploy Everything in Kubernetes
-```bash
-# Create namespace
-kubectl create namespace nodejs
-
-# Deploy MongoDB and application
-kubectl apply -f k8s/
-```
-
-#### Deploy Only the Application (with External MongoDB)
-```bash
-# Create namespace
-kubectl create namespace nodejs
-
-# Deploy only the application
-docker build -t api-testing-tool .
-kubectl delete -f k8s/app.yaml
 kubectl apply -f k8s/app.yaml
 ```
 
-kubectl wait --for=condition=available --timeout=300s deployment/mongodb -n nodejs
-kubectl wait --for=condition=available --timeout=300s deployment/api-testing-ui -n nodejs
+## Observability
 
-## Cross-Environment Communication
+The application is configured with OpenTelemetry for comprehensive observability:
 
-The application can communicate between different deployment environments. Here are some common scenarios:
+### Traces
+- HTTP request/response tracing
+- Express middleware tracing
+- MongoDB operation tracing
+- Custom span creation for business operations
 
-### 1. Kubernetes App → Docker MongoDB
-```bash
-# Run MongoDB in Docker
-docker run -d \
-  -p 27017:27017 \
-  --name mongodb \
-  mongo:latest
+### Metrics
+- HTTP request counts
+- Response time histograms
+- Export batch statistics
+- Active spans gauge
 
-# Deploy app to Kubernetes with Docker MongoDB connection
-kubectl apply -f k8s/app.yaml
-# Update MONGODB_URI in the deployment to point to your Docker MongoDB
-```
+### Logs
+- Application logs
+- HTTP request/response logs
+- Error logs
+- OpenTelemetry SDK logs
 
-### 2. Docker App → Kubernetes MongoDB
-```bash
-# Deploy MongoDB to Kubernetes
-kubectl apply -f k8s/mongodb.yaml
-
-# Run app in Docker with Kubernetes MongoDB connection
-docker run -d \
-  -p 3000:3000 \
-  -e MONGODB_URI=mongodb://mongodb.nodejs.svc.cluster.local:27017/api-testing \
-  -e PORT=3000 \
-  --name api-testing \
-  api-testing-tool
-```
+### Visualization
+- Grafana dashboards for metrics and logs
+- Trace visualization in your preferred backend
+- Log aggregation with Loki
 
 ## Environment Variables
 
-- `PORT`: The port the application runs on (default: 3000)
-- `MONGODB_URI`: MongoDB connection string (required for database mode)
-- `LOG_LEVEL`: Logging level (default: 'info')
+### Application Configuration
+- `NODE_ENV`: Environment (development/production)
+- `PORT`: Application port
+- `LOG_LEVEL`: Logging level (debug/info/warn/error)
+- `MONGODB_URI`: MongoDB connection string
 
-## Troubleshooting
+### OpenTelemetry Configuration
+- `OTEL_ENABLED`: Enable/disable OpenTelemetry
+- `OTEL_SERVICE_NAME`: Service name for telemetry
+- `OTEL_SERVICE_VERSION`: Service version
+- `OTEL_SAMPLING_RATE`: Trace sampling rate
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP endpoint
+- `OTEL_EXPORTER_OTLP_HEADERS`: OTLP headers
 
-### MongoDB Connection Issues
+### Instrumentation Control
+- `OTEL_INSTRUMENT_HTTP`: Enable HTTP instrumentation
+- `OTEL_INSTRUMENT_EXPRESS`: Enable Express instrumentation
+- `OTEL_INSTRUMENT_MONGODB`: Enable MongoDB instrumentation
 
-1. Check MongoDB status:
-```bash
-# For Docker
-docker ps | grep mongodb
-docker logs mongodb
+## Contributing
 
-# For Kubernetes
-kubectl get pods -n nodejs -l app=mongodb
-kubectl logs -n nodejs -l app=mongodb
-```
-
-2. Test MongoDB connection:
-```bash
-# For Docker
-docker exec -it mongodb mongosh
-
-# For Kubernetes
-kubectl exec -n nodejs -it $(kubectl get pod -n nodejs -l app=mongodb -o jsonpath="{.items[0].metadata.name}") -- mongosh
-```
-
-### Application Issues
-
-1. Check application status:
-```bash
-# For Docker
-docker ps | grep api-testing
-docker logs api-testing
-
-# For Kubernetes
-kubectl get pods -n nodejs -l app=api-testing-ui
-kubectl logs -n nodejs -l app=api-testing-ui
-```
-
-2. Verify environment variables:
-```bash
-# For Docker
-docker exec api-testing env | grep MONGODB_URI
-
-# For Kubernetes
-kubectl exec -n nodejs -it $(kubectl get pod -n nodejs -l app=api-testing-ui -o jsonpath="{.items[0].metadata.name}") -- env | grep MONGODB_URI
-```
-
-## API Endpoints
-
-- `GET /`: Main application interface
-- `POST /api/test`: Make an API request
-- `GET /api/history`: Get request history
-- `DELETE /api/history`: Clear request history
-- `DELETE /api/requests/:id`: Delete a specific request
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
-MIT 
+This project is licensed under the MIT License - see the LICENSE file for details. 

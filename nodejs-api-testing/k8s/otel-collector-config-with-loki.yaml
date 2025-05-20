@@ -9,57 +9,40 @@ data:
       otlp:
         protocols:
           grpc:
-            endpoint: "0.0.0.0:4317"
-            include_metadata: true
-            transport: "tcp"
-            max_recv_msg_size_mib: 64
-            max_concurrent_streams: 1000
-            read_buffer_size: 512_000
-            write_buffer_size: 512_000
-            keepalive:
-              server_parameters:
-                max_connection_age: 30s
-                max_connection_age_grace: 5s
-                time: 5s
-                timeout: 5s
-                max_connection_idle: 10s
-              enforcement_policy:
-                min_time: 5s
-                permit_without_stream: true
+            endpoint: 0.0.0.0:4317
           http:
-            endpoint: "0.0.0.0:4318"
+            endpoint: 0.0.0.0:4318
             cors:
               allowed_origins: ["*"]
-            include_metadata: true
+            max_request_body_size: 10_000_000
       prometheus:
         config:
           scrape_configs:
             - job_name: 'otel-collector'
               static_configs:
-                - targets: ['localhost:8888']
-              metric_relabel_configs:
-                - action: labeldrop
-                  regex: ^target_info.*
+                - targets: ['0.0.0.0:8888']
 
     processors:
       batch:
-        timeout: 1s
         send_batch_size: 1000
+        timeout: 10s
       memory_limiter:
-        limit_mib: 1000
-        spike_limit_mib: 200
-        check_interval: 30s
+        check_interval: 1s
+        limit_mib: 1500
+        spike_limit_mib: 512
       resource:
         attributes:
-          - key: loki.resource.labels
-            value: service.name,service.namespace
-            action: insert
+          - key: service.name
+            value: "api-testing-tool"
+            action: upsert
 
     exporters:
       debug:
         verbosity: detailed
-        sampling_initial: 1
-        sampling_thereafter: 1
+      logging:
+        loglevel: debug
+      loki:
+        endpoint: http://loki:3100/loki/api/v1/push
       prometheus:
         endpoint: "0.0.0.0:8889"
         namespace: "otel"
@@ -67,18 +50,11 @@ data:
           label1: value1
         send_timestamps: true
         metric_expiration: 180m
-      logging:
-        loglevel: debug
-      loki:
-        endpoint: "http://loki:3100/loki/api/v1/push"
-        default_labels_enabled:
-          exporter: true
-          job: true
 
     service:
       telemetry:
         logs:
-          level: "debug"
+          level: debug
           development: true
           encoding: "console"
         metrics:
@@ -87,13 +63,13 @@ data:
       pipelines:
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, batch]
-          exporters: [debug]
+          processors: [memory_limiter, batch, resource]
+          exporters: [debug, logging]
         metrics:
-          receivers: [otlp, prometheus]
-          processors: [memory_limiter, batch]
-          exporters: [prometheus]
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource]
+          exporters: [debug, logging, prometheus]
         logs:
           receivers: [otlp]
-          processors: [memory_limiter, resource, batch]
-          exporters: [debug, loki, logging]
+          processors: [memory_limiter, batch, resource]
+          exporters: [debug, logging, loki]

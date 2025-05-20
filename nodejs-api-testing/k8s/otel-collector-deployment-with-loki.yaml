@@ -22,6 +22,9 @@ spec:
         # Using a specific version of the contrib image that includes the Loki exporter
         image: otel/opentelemetry-collector-contrib:0.96.0
         name: otel-collector
+        env:
+        - name: OTEL_FEATURE_FLAGS
+          value: "component.UseLocalHostAsDefaultHost"
         ports:
         - containerPort: 4317
           protocol: TCP

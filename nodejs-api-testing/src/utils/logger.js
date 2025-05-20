@@ -1,32 +1,48 @@
 const pino = require('pino');
+const { logs } = require('@opentelemetry/api-logs');
 
-// Create logger with direct stdout output
+// Create a logger instance
 const logger = pino({
-  level: (process.env.LOG_LEVEL || 'info').toLowerCase(),
-  customLevels: {
-    fatal: 60,
-    error: 50,
-    warn: 40,
-    info: 30,
-    debug: 20,
-    trace: 10
-  },
-  base: null,
-  timestamp: () => `,"time":"${new Date().toISOString()}"`,
+  level: process.env.LOG_LEVEL || 'info',
   formatters: {
     level: (label) => {
-      return { level: label.toUpperCase() };
+      return { level: label };
+    },
+  },
+  timestamp: () => `,"time":"${new Date().toISOString()}"`,
+});
+
+// Create a wrapper that sends logs to both Pino and OpenTelemetry
+const otelLogger = logs.getLogger('api-testing-tool');
+
+function createLogWrapper(level) {
+  return function(msg, obj = {}) {
+    // Log to Pino
+    logger[level](obj, msg);
+
+    // Log to OpenTelemetry
+    if (otelLogger) {
+      otelLogger.emit({
+        severityText: level.toUpperCase(),
+        body: msg,
+        attributes: {
+          ...obj,
+          'service.name': process.env.OTEL_SERVICE_NAME || 'api-testing-tool',
+          'service.version': process.env.OTEL_SERVICE_VERSION || '1.0.7',
+          'environment': process.env.NODE_ENV || 'production'
+        }
+      });
     }
-  }
-});
+  };
+}
 
-// Log initial configuration
-logger.info({
-  msg: 'Logger initialized',
-  config: {
-    level: logger.level,
-    environment: process.env.NODE_ENV || 'development'
-  }
-});
+// Create wrapped logging functions
+const wrappedLogger = {
+  debug: createLogWrapper('debug'),
+  info: createLogWrapper('info'),
+  warn: createLogWrapper('warn'),
+  error: createLogWrapper('error'),
+  fatal: createLogWrapper('fatal')
+};
 
-module.exports = logger; 
+module.exports = wrappedLogger; 
