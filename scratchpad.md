@@ -54,8 +54,10 @@ Installation
 # Create namespace
 kubectl create namespace nodejs
 
+kubectl apply -f k8s/mongodb.yaml
+
 # Deploy only the application
-docker build -t api-testing-tool .
+docker build --no-cache -t api-testing-tool .
 kubectl delete -f k8s/app.yaml
 kubectl apply -f k8s/app.yaml
 ```
@@ -468,4 +470,6 @@ Check Server Health/Env
 
 
 kubectl logs -n nestjs $(kubectl get pods -n nestjs -o jsonpath='{.items[0].metadata.name}') --tail=100
+
+kubectl exec -it $(kubectl get pod -n nodejs -l app=api-testing-ui -o jsonpath='{.items[0].metadata.name}') -- cat /app/src/utils/tracing.js
 

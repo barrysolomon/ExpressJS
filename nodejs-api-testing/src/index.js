@@ -205,16 +205,21 @@ app.get('/js/app.js', (req, res) => {
                     // Delete request from history
                     window.deleteRequest = async function(index) {
                         const request = requestHistory[index];
+                        if (!request || !request._id) {
+                            console.error('Invalid request or missing ID');
+                            return;
+                        }
                         try {
-                            const response = await axios.delete(\`/api/requests/\${request._id}\`);
+                            const response = await axios.delete('/api/requests/' + request._id);
                             if (response.status === 200) {
                                 requestHistory.splice(index, 1);
                                 updateHistoryTable();
+                                console.log('Request deleted successfully');
                             } else {
-                                console.error('Failed to delete request');
+                                console.error('Failed to delete request:', response.data);
                             }
                         } catch (error) {
-                            console.error('Error deleting request:', error);
+                            console.error('Error deleting request:', error.response?.data || error.message);
                         }
                     };
 

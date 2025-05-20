@@ -488,13 +488,28 @@ function logEnvironmentVariables() {
   });
 }
 
-function initTracing() {
+async function initTracing() {
   if (process.env.OTEL_ENABLED !== 'true') {
     logger.info('OpenTelemetry tracing is disabled');
+    // Initialize a no-op tracer when tracing is disabled
+    tracer = trace.getTracer('no-op-tracer');
     return Promise.resolve();
   }
 
   logEnvironmentVariables();
+
+  // Define configuration object
+  const config = {
+    serviceName: process.env.OTEL_SERVICE_NAME || 'api-testing-ui',
+    serviceVersion: process.env.OTEL_SERVICE_VERSION || '1.0.7',
+    environment: process.env.NODE_ENV || 'production',
+    samplingRate: process.env.OTEL_SAMPLING_RATE || '1.0',
+    enabledInstrumentations: {
+      http: process.env.OTEL_INSTRUMENT_HTTP === 'true',
+      express: process.env.OTEL_INSTRUMENT_EXPRESS === 'true',
+      mongodb: process.env.OTEL_INSTRUMENT_MONGODB === 'true'
+    }
+  };
 
   try {
     // Create a test span to verify tracing is working
@@ -546,121 +561,23 @@ function initTracing() {
       maxExportBatchSize: parseInt(process.env.OTEL_BSP_MAX_EXPORT_BATCH_SIZE || '512')
     });
 
-    // Override onStart to track spans
-    const originalOnStart = spanProcessor.onStart.bind(spanProcessor);
-    spanProcessor.onStart = (span, parentContext) => {
-      spanProcessor.exportCount = (spanProcessor.exportCount || 0) + 1;
-      logger.debug({
-        msg: 'Span started',
-        span: {
-          name: span.name,
-          kind: span.kind,
-          traceId: span.spanContext().traceId,
-          spanId: span.spanContext().spanId,
-          parentSpanId: span.parentSpanId,
-          attributes: span.attributes
-        }
-      });
-      return originalOnStart(span, parentContext);
-    };
-
-    // Override onEnd to track spans
-    const originalOnEnd = spanProcessor.onEnd.bind(spanProcessor);
-    spanProcessor.onEnd = (span) => {
-      logger.debug({
-        msg: 'Span ended',
-        span: {
-          name: span.name,
-          kind: span.kind,
-          traceId: span.spanContext().traceId,
-          spanId: span.spanContext().spanId,
-          parentSpanId: span.parentSpanId,
-          duration: span.endTime - span.startTime,
-          attributes: span.attributes
-        }
-      });
-      return originalOnEnd(span);
-    };
-
-    // Override export to track successful exports
-    const originalExport = traceExporter.export.bind(traceExporter);
-    traceExporter.export = async (spans, resultCallback) => {
-      logger.debug({
-        msg: 'Attempting to export spans',
-        spanCount: spans.length,
-        spans: spans.map(span => ({
-          name: span.name,
-          traceId: span.spanContext().traceId,
-          spanId: span.spanContext().spanId,
-          parentSpanId: span.parentSpanId,
-          attributes: span.attributes,
-          kind: span.kind
-        }))
-      });
-
-      try {
-        const result = await originalExport(spans, resultCallback);
-        spanProcessor.successfulExports = (spanProcessor.successfulExports || 0) + 1;
-        spanProcessor.totalSpansExported = (spanProcessor.totalSpansExported || 0) + spans.length;
-        spanProcessor.totalBatchesExported = (spanProcessor.totalBatchesExported || 0) + 1;
-        logger.debug({
-          msg: 'Successfully exported spans',
-          spanCount: spans.length,
-          stats: {
-            successfulExports: spanProcessor.successfulExports,
-            totalSpansExported: spanProcessor.totalSpansExported,
-            totalBatchesExported: spanProcessor.totalBatchesExported,
-            spans: spans.map(span => ({
-              name: span.name,
-              kind: span.kind,
-              traceId: span.spanContext().traceId,
-              spanId: span.spanContext().spanId,
-              attributes: span.attributes
-            }))
-          }
-        });
-        return result;
-      } catch (error) {
-        spanProcessor.failedExports = (spanProcessor.failedExports || 0) + 1;
-        logger.error({
-          msg: 'Failed to export spans',
-          error: {
-            name: error.name,
-            message: error.message,
-            stack: error.stack
-          }
-        });
-        throw error;
-      }
-    };
-
     // Log SDK configuration before creation
     logger.info({
       msg: 'Creating OpenTelemetry SDK',
-      config: {
-        serviceName: process.env.OTEL_SERVICE_NAME || 'api-testing-ui',
-        serviceVersion: process.env.OTEL_SERVICE_VERSION || '1.0.7',
-        environment: process.env.NODE_ENV || 'production',
-        samplingRate: process.env.OTEL_SAMPLING_RATE || '1.0',
-        enabledInstrumentations: {
-          http: process.env.OTEL_INSTRUMENT_HTTP === 'true',
-          express: process.env.OTEL_INSTRUMENT_EXPRESS === 'true',
-          mongodb: process.env.OTEL_INSTRUMENT_MONGODB === 'true'
-        }
-      }
+      config: config
     });
 
     const sdk = new NodeSDK({
       resource: new Resource({
-        [SemanticResourceAttributes.SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || 'api-testing-ui',
-        [SemanticResourceAttributes.SERVICE_VERSION]: process.env.OTEL_SERVICE_VERSION || '1.0.7',
-        [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: process.env.NODE_ENV || 'production'
+        [SemanticResourceAttributes.SERVICE_NAME]: config.serviceName,
+        [SemanticResourceAttributes.SERVICE_VERSION]: config.serviceVersion,
+        [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: config.environment
       }),
       spanProcessor: spanProcessor,
-      sampler: new TraceIdRatioBasedSampler(config.samplingRate),
+      sampler: new TraceIdRatioBasedSampler(parseFloat(config.samplingRate)),
       instrumentations: [
         new HttpInstrumentation({
-          enabled: process.env.OTEL_INSTRUMENT_HTTP === 'true',
+          enabled: config.enabledInstrumentations.http,
           ignoreIncomingRequestHook: (request) => {
             return request.url === '/health';
           },
@@ -677,66 +594,10 @@ function initTracing() {
             if (currentSpan) {
               span.setParent(currentSpan);
             }
-          },
-          startIncomingSpanHook: (request) => {
-            const currentSpan = trace.getSpan(context.active());
-            const spanContext = currentSpan ? currentSpan.spanContext() : undefined;
-            return {
-              name: `${request.method} ${request.url}`,
-              kind: SpanKind.SERVER,
-              attributes: {
-                'http.request.method': request.method,
-                'http.request.url': request.url,
-                'ui.action': currentSpan?.attributes['ui.action'] || 'unknown'
-              },
-              parent: spanContext
-            };
-          },
-          startOutgoingSpanHook: (request) => {
-            const currentSpan = trace.getSpan(context.active());
-            const spanContext = currentSpan ? currentSpan.spanContext() : undefined;
-            
-            // Create a child span for the outgoing request
-            const childSpan = tracer.startSpan(
-              `${request.method} ${request.url}`,
-              {
-                kind: SpanKind.CLIENT,
-                attributes: {
-                  'http.request.method': request.method,
-                  'http.request.url': request.url,
-                  'ui.action': currentSpan?.attributes['ui.action'] || 'unknown'
-                },
-                parent: spanContext
-              }
-            );
-            
-            return {
-              name: `${request.method} ${request.url}`,
-              kind: SpanKind.CLIENT,
-              attributes: {
-                'http.request.method': request.method,
-                'http.request.url': request.url,
-                'ui.action': currentSpan?.attributes['ui.action'] || 'unknown'
-              },
-              parent: childSpan.spanContext()
-            };
-          },
-          requestHook: (span, request) => {
-            const currentSpan = trace.getSpan(context.active());
-            if (currentSpan) {
-              span.setParent(currentSpan);
-            }
-            span.setAttribute('http.request.method', request.method);
-            span.setAttribute('http.request.url', request.url);
-            span.setAttribute('http.request.headers', JSON.stringify(request.headers));
-          },
-          responseHook: (span, response) => {
-            span.setAttribute('http.response.status_code', response.statusCode);
-            span.setAttribute('http.response.headers', JSON.stringify(response.headers));
           }
         }),
         new ExpressInstrumentation({
-          enabled: process.env.OTEL_INSTRUMENT_EXPRESS === 'true',
+          enabled: config.enabledInstrumentations.express,
           requestHook: (span, req) => {
             const currentSpan = trace.getSpan(context.active());
             span.setAttribute('http.route', req.route?.path || 'unknown');
@@ -751,7 +612,7 @@ function initTracing() {
           }
         }),
         new MongoDBInstrumentation({
-          enabled: true,
+          enabled: config.enabledInstrumentations.mongodb,
           enhancedDatabaseReporting: true,
           applyCustomAttributesOnSpan: (span, operation, attributes) => {
             const currentSpan = trace.getSpan(context.active());
@@ -765,154 +626,36 @@ function initTracing() {
             if (currentSpan) {
               span.setParent(currentSpan);
             }
-          },
-          startSpanHook: (operation, attributes) => {
-            const currentSpan = trace.getSpan(context.active());
-            const spanContext = currentSpan ? currentSpan.spanContext() : undefined;
-            return {
-              name: `mongodb.${operation}`,
-              kind: SpanKind.CLIENT,
-              attributes: {
-                'db.operation': operation,
-                'db.system': 'mongodb',
-                'db.name': attributes.dbName || 'unknown',
-                'db.collection': attributes.collection || 'unknown',
-                'ui.action': currentSpan?.attributes['ui.action'] || 'unknown'
-              },
-              parent: spanContext
-            };
           }
         })
       ]
     });
 
-    // Override the tracer to ensure proper context propagation
-    const originalGetTracer = trace.getTracer;
-    trace.getTracer = function(name, version) {
-      const tracer = originalGetTracer(name, version);
-      const originalStartSpan = tracer.startSpan;
-      tracer.startSpan = function(name, options, context) {
-        const currentSpan = trace.getSpan(context || trace.getActiveSpan());
-        if (currentSpan) {
-          options = options || {};
-          options.parent = currentSpan;
-          // Propagate UI action attribute
-          if (currentSpan.attributes['ui.action']) {
-            options.attributes = {
-              ...options.attributes,
-              'ui.action': currentSpan.attributes['ui.action']
-            };
-          }
-        }
-        return originalStartSpan.call(this, name, options, context);
-      };
-      return tracer;
-    };
-
-    sdk.start();
-    logger.info('OpenTelemetry SDK started successfully');
-
-    // Create another test span after SDK initialization
-    const postInitSpan = tracer.startSpan('post-init-test-span');
-    postInitSpan.setAttribute('test.phase', 'post-initialization');
-    postInitSpan.end();
-
-    logger.info({
-      msg: 'Created post-initialization test span',
-      span: {
-        name: postInitSpan.name,
-        traceId: postInitSpan.spanContext().traceId,
-        spanId: postInitSpan.spanContext().spanId
-      }
-    });
-
-    // Log active spans periodically
-    setInterval(() => {
-      const currentSpan = trace.getSpan(context.active());
-      logger.info({
-        msg: 'OpenTelemetry Status',
-        stats: {
-          enabled: process.env.OTEL_ENABLED === 'true',
-          samplingRate: process.env.OTEL_SAMPLING_RATE,
-          instrumentations: {
-            http: process.env.OTEL_INSTRUMENT_HTTP === 'true',
-            express: process.env.OTEL_INSTRUMENT_EXPRESS === 'true',
-            mongodb: process.env.OTEL_INSTRUMENT_MONGODB === 'true'
-          },
-          currentSpan: currentSpan ? {
-            name: currentSpan.name,
-            traceId: currentSpan.spanContext().traceId,
-            spanId: currentSpan.spanContext().spanId
-          } : null
+    try {
+      await sdk.start();
+      logger.info('OpenTelemetry SDK started successfully');
+      return Promise.resolve();
+    } catch (error) {
+      logger.error({
+        msg: 'Error starting OpenTelemetry SDK',
+        error: {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
         }
       });
-    }, 5000);
-
-    // Log span export status periodically
-    setInterval(() => {
-      logger.info({
-        msg: 'Span Export Status',
-        stats: {
-          exportCount: spanProcessor.exportCount,
-          successfulExports: spanProcessor.successfulExports,
-          failedExports: spanProcessor.failedExports,
-          totalSpansExported: spanProcessor.totalSpansExported,
-          totalBatchesExported: spanProcessor.totalBatchesExported,
-          successRate: spanProcessor.successfulExports + spanProcessor.failedExports > 0 ?
-            `${((spanProcessor.successfulExports / (spanProcessor.successfulExports + spanProcessor.failedExports)) * 100).toFixed(2)}%` :
-            'N/A'
-        }
-      });
-    }, 10000);
-
-    process.on('SIGTERM', () => {
-      try {
-        sdk.shutdown();
-        logger.info('OpenTelemetry SDK shut down successfully');
-        process.exit(0);
-      } catch (error) {
-        logger.error({
-          msg: 'Error shutting down OpenTelemetry SDK',
-          error: {
-            name: error.name,
-            message: error.message,
-            stack: error.stack,
-            cause: error.cause ? {
-              name: error.cause.name,
-              message: error.cause.message,
-              stack: error.cause.stack
-            } : undefined
-          }
-        });
-        process.exit(1);
-      }
-    });
-
-    // Export the wrapWithSpan function
-    module.exports = {
-      initTracing,
-      metrics,
-      requestCounter,
-      responseTimeHistogram,
-      exportBatchCounter,
-      exportErrorCounter,
-      activeSpansGauge,
-      wrapWithSpan
-    };
+      return Promise.reject(error);
+    }
   } catch (error) {
     logger.error({
       msg: 'Error initializing OpenTelemetry SDK',
       error: {
         name: error.name,
         message: error.message,
-        stack: error.stack,
-        cause: error.cause ? {
-          name: error.cause.name,
-          message: error.cause.message,
-          stack: error.cause.stack
-        } : undefined
+        stack: error.stack
       }
     });
+    return Promise.reject(error);
   }
 }
 

@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: api-testing-ui
+  name: api-testing-tool
   namespace: nodejs
   labels:
-    app: api-testing-ui
+    app: api-testing-tool
     version: "1.0.7"
     environment: production
     lumigo.auto-trace: "false"  # <-- No injection will take place
@@ -21,17 +21,17 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: api-testing-ui
+      app: api-testing-tool
   template:
     metadata:
       labels:
-        app: api-testing-ui
+        app: api-testing-tool
         version: "1.0.7"
         environment: production
     spec:
       containers:
-      - name: api-testing-ui
-        image: api-testing-ui:latest
+      - name: api-testing-tool
+        image: api-testing-tool:latest
         imagePullPolicy: Never
         ports:
         - name: http
@@ -55,9 +55,9 @@ spec:
         
         # OpenTelemetry Basic Configuration
         - name: OTEL_ENABLED
-          value: "false"
+          value: "true"
         - name: OTEL_SERVICE_NAME
-          value: "api-testing-ui"
+          value: "api-testing-tool"
         - name: OTEL_SERVICE_VERSION
           value: "1.0.7"
         - name: OTEL_LOG_LEVEL
@@ -166,15 +166,15 @@ spec:
         emptyDir: {}
       - name: config
         configMap:
-          name: api-testing-ui-config
+          name: api-testing-tool-config
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: api-testing-ui
+  name: api-testing-tool
   namespace: nodejs
   labels:
-    app: api-testing-ui
+    app: api-testing-tool
     version: "1.0.7"
   annotations:
     prometheus.io/scrape: "true"
@@ -182,7 +182,7 @@ metadata:
     prometheus.io/path: "/metrics"
 spec:
   selector:
-    app: api-testing-ui
+    app: api-testing-tool
   ports:
   - name: http
     port: 80
@@ -195,17 +195,17 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: api-testing-ui-config
+  name: api-testing-tool-config
   namespace: nodejs
   labels:
-    app: api-testing-ui
+    app: api-testing-tool
     version: "1.0.7"
 data:
   NODE_ENV: "production"
   LOG_LEVEL: "debug"
   HTTP_LOGGING_ENABLED: "true"
   OTEL_ENABLED: "true"
-  OTEL_SERVICE_NAME: "api-testing-ui"
+  OTEL_SERVICE_NAME: "api-testing-tool"
   OTEL_SERVICE_VERSION: "1.0.7"
   OTEL_LOG_LEVEL: "debug"
   OTEL_SAMPLING_RATE: "0.2"
