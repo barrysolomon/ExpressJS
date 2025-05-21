@@ -16,6 +16,9 @@ RUN node increment-version.js > .version
 # Copy application files
 COPY . .
 
+# Copy public files
+COPY src/public ./public
+
 # Create logs directory with proper permissions
 RUN mkdir -p /app/logs && chown -R node:node /app/logs
 

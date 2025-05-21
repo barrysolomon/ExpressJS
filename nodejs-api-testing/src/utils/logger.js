@@ -1,5 +1,5 @@
-const pino = require('pino');
-const { logs } = require('@opentelemetry/api-logs');
+import pino from 'pino';
+import { logs } from '@opentelemetry/api-logs';
 
 // Create a logger instance
 const logger = pino({
@@ -45,4 +45,4 @@ const wrappedLogger = {
   fatal: createLogWrapper('fatal')
 };
 
-module.exports = wrappedLogger; 
+export default wrappedLogger; 

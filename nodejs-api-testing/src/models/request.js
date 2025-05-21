@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const requestSchema = new mongoose.Schema({
     method: {
@@ -50,4 +50,4 @@ requestSchema.index({ method: 1 });
 
 const Request = mongoose.model('Request', requestSchema);
 
-module.exports = Request; 
+export default Request; 

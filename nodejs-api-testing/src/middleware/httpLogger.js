@@ -1,4 +1,4 @@
-const logger = require('../utils/logger');
+import logger from '../utils/logger.js';
 
 function httpLogger(req, res, next) {
   if (process.env.HTTP_LOGGING_ENABLED !== 'true') {
@@ -17,8 +17,8 @@ function httpLogger(req, res, next) {
     method: req.method,
     url: req.url,
     headers: req.headers,
-    query: req.query,
-    body: req.body,
+    query: JSON.stringify(req.query),
+    body: JSON.stringify(req.body),
     ip: req.ip,
     timestamp: new Date().toISOString()
   });
@@ -34,7 +34,7 @@ function httpLogger(req, res, next) {
       statusCode: res.statusCode,
       responseTime: `${responseTime}ms`,
       headers: res.getHeaders(),
-      body: body,
+      body: typeof body === 'string' ? body : JSON.stringify(body),
       timestamp: new Date().toISOString()
     });
 
@@ -44,4 +44,4 @@ function httpLogger(req, res, next) {
   next();
 }
 
-module.exports = httpLogger; 
+export default httpLogger; 

@@ -446,7 +446,7 @@ data:
                 "uid": "loki"
               },
               "editorMode": "builder",
-              "expr": "{service_name=~\".+\"}",
+              "expr": "{job=\"api-testing-tool\"}",
               "queryType": "range",
               "refId": "A"
             }

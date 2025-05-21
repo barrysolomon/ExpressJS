@@ -1,8 +1,9 @@
-const express = require('express');
+import express from 'express';
+import Request from '../models/request.js';
+import axios from 'axios';
+import pino from 'pino';
+
 const router = express.Router();
-const Request = require('../models/request');
-const axios = require('axios');
-const pino = require('pino');
 
 // Create logger with default configuration
 const logger = pino();
@@ -198,59 +199,12 @@ router.post('/request', async (req, res) => {
                 method: req.body.method,
                 headers: req.body.headers,
                 bodySize: req.body.body ? JSON.stringify(req.body.body).length : 0
-            },
-            response: err.response ? {
-                status: err.response.status,
-                headers: err.response.headers,
-                data: err.response.data
-            } : null
-        });
-        
-        // Save failed request
-        const request = new Request({
-            url: req.body.url,
-            method: req.body.method,
-            headers: req.body.headers,
-            body: req.body.body,
-            response: {
-                status_code: err.response?.status || 500,
-                headers: err.response?.headers || {},
-                body: err.response?.data || { error: err.message }
-            },
-            timestamp: new Date()
-        });
-
-        await request.save();
-
-        // Log failed request saved to database
-        logger.info('Failed request saved to database', {
-            event: 'database_operation',
-            operation: 'insert',
-            collection: 'requests',
-            documentId: request._id.toString(),
-            metadata: {
-                requestId,
-                status: 'failed',
-                error: err.message,
-                url: req.body.url,
-                method: req.body.method,
-                timestamp: request.timestamp.toISOString()
             }
         });
 
-        res.status(err.response?.status || 500).json({
-            error: err.message,
-            request: {
-                id: request._id,
-                url: req.body.url,
-                method: req.body.method,
-                response: {
-                    status_code: err.response?.status || 500,
-                    headers: err.response?.headers || {},
-                    body: err.response?.data || { error: err.message }
-                },
-                timestamp: request.timestamp
-            }
+        res.status(500).json({
+            success: false,
+            error: err.message
         });
     }
 });
@@ -356,4 +310,4 @@ router.get('/request/:id', async (req, res) => {
     }
 });
 
-module.exports = router; 
+export default router; 

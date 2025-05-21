@@ -1,20 +1,20 @@
-const { Resource } = require('@opentelemetry/resources');
-const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
-const { NodeSDK } = require('@opentelemetry/sdk-node');
-const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
-const { SimpleSpanProcessor, BatchSpanProcessor, TraceIdRatioBasedSampler } = require('@opentelemetry/sdk-trace-base');
-const { HttpInstrumentation } = require('@opentelemetry/instrumentation-http');
-const { ExpressInstrumentation } = require('@opentelemetry/instrumentation-express');
-const { MongoDBInstrumentation } = require('@opentelemetry/instrumentation-mongodb');
-const { metrics, ValueType } = require('@opentelemetry/api-metrics');
-const { MeterProvider } = require('@opentelemetry/sdk-metrics');
-const { OTLPMetricExporter } = require('@opentelemetry/exporter-metrics-otlp-http');
-const { PeriodicExportingMetricReader } = require('@opentelemetry/sdk-metrics');
-const { OTLPLogExporter } = require('@opentelemetry/exporter-logs-otlp-http');
-const { LoggerProvider, SimpleLogRecordProcessor } = require('@opentelemetry/sdk-logs');
-const { logs } = require('@opentelemetry/api-logs');
-const logger = require('./logger');
-const { trace, context, SpanKind, SpanStatusCode } = require('@opentelemetry/api');
+import { Resource } from '@opentelemetry/resources';
+import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { SimpleSpanProcessor, BatchSpanProcessor, TraceIdRatioBasedSampler } from '@opentelemetry/sdk-trace-base';
+import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
+import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
+import { MongoDBInstrumentation } from '@opentelemetry/instrumentation-mongodb';
+import { metrics, ValueType } from '@opentelemetry/api-metrics';
+import { MeterProvider } from '@opentelemetry/sdk-metrics';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
+import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
+import { LoggerProvider, BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
+import { logs } from '@opentelemetry/api-logs';
+import logger from './logger.js';
+import { trace, context, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 
 // Create metrics
 const meter = metrics.getMeter('api-testing-metrics');
@@ -517,11 +517,20 @@ async function initTracing() {
 
     // Add the log processor to the logger provider
     loggerProvider.addLogRecordProcessor(
-      new SimpleLogRecordProcessor(logExporter)
+      new BatchLogRecordProcessor(logExporter)
     );
 
     // Set the global logger provider
     logs.setGlobalLoggerProvider(loggerProvider);
+
+    // Check if providers are already registered
+    const hasMeterProvider = !!metrics.getMeterProvider();
+    const hasTracerProvider = !!trace.getTracerProvider();
+
+    if (hasMeterProvider || hasTracerProvider) {
+      logger.warn('OpenTelemetry providers already registered, skipping initialization');
+      return;
+    }
 
     // Create the SDK instance
     const sdk = new NodeSDK({
@@ -536,14 +545,35 @@ async function initTracing() {
         exportIntervalMillis: 1000
       }),
       instrumentations: [
-        new HttpInstrumentation(),
+        new HttpInstrumentation({
+          ignoreIncomingRequestHook: (request) => {
+            // Ignore health check requests
+            return request.url === '/health';
+          },
+          requestHook: (span, request) => {
+            // Only add query and body if they are simple objects
+            if (request.query && typeof request.query === 'object') {
+              try {
+                span.setAttribute('http.query', JSON.stringify(request.query));
+              } catch (error) {
+                // Ignore serialization errors
+              }
+            }
+            if (request.body && typeof request.body === 'object') {
+              try {
+                span.setAttribute('http.body', JSON.stringify(request.body));
+              } catch (error) {
+                // Ignore serialization errors
+              }
+            }
+          }
+        }),
         new ExpressInstrumentation(),
         new MongoDBInstrumentation()
       ],
       sampler: new TraceIdRatioBasedSampler(1.0)
     });
 
-    // Start the SDK
     await sdk.start();
     logger.info('OpenTelemetry SDK started successfully');
 
@@ -568,13 +598,4 @@ async function initTracing() {
   }
 }
 
-module.exports = {
-  initTracing,
-  metrics,
-  requestCounter,
-  responseTimeHistogram,
-  exportBatchCounter,
-  exportErrorCounter,
-  activeSpansGauge,
-  wrapWithSpan
-}; 
+export { initTracing, wrapWithSpan }; 
